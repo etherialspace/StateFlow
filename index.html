@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>StateFlow — Render-Style Developer Scratchpad</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body data-theme="dark">
+
+  <!-- Top Navbar (56px fixed, border-bottom: 1px solid #222222, bg: #0A0A0A) -->
+  <header class="navbar">
+    <div class="navbar-inner">
+      <div class="navbar-left">
+        <div class="brand">
+          <span class="mark-poly"></span>
+          <span class="brand-name">StateFlow</span>
+        </div>
+      </div>
+
+      <div class="navbar-center">
+        <div class="search-box">
+          <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="11" cy="11" r="8"></circle>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+          </svg>
+          <input id="searchInput" type="text" class="search-input" placeholder="Search notes, payloads (Press /)..." />
+          <kbd class="kbd-shortcut">/</kbd>
+        </div>
+      </div>
+
+      <div class="navbar-right">
+        <button id="privacyToggleBtn" class="btn btn-secondary btn-sm" onclick="togglePrivacyMode()" title="Toggle secret masking">
+          <span id="privacyLabel">Privacy: Off</span>
+        </button>
+
+        <button id="themeToggleBtn" class="btn btn-secondary btn-sm" onclick="toggleContrastTheme()" title="Switch dark/light theme">
+          <span class="btn-text-full">Theme: Dark</span>
+          <span class="btn-text-short">Dark</span>
+        </button>
+
+        <button class="btn btn-primary btn-sm" onclick="openExportModal()">
+          <span class="btn-text-full">Export Markdown</span>
+          <span class="btn-text-short">Export</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Content Workspace (Base Background #000000 True Black) -->
+  <main class="main-container">
+    <!-- Ingestion / Composer Box (Elevated Surface #0A0A0A, 1px border #222222) -->
+    <section class="composer-card">
+      <div class="composer-header">
+        <span class="composer-section-label">NEW NOTE ENTRY</span>
+      </div>
+
+      <!-- Mandatory Note Title at the Top -->
+      <div class="composer-title-wrapper">
+        <input
+          id="scratchTitleInput"
+          type="text"
+          class="composer-title-input"
+          placeholder="Note title (required)..."
+          required
+        />
+      </div>
+
+      <textarea
+        id="scratchInput"
+        class="composer-textarea"
+        placeholder="Type notes, tasks (- [ ] task), URLs with tracking tags, JSON payloads, math formulas (e.g. 450 * 12), or tabular CSV..."
+      ></textarea>
+
+      <div class="composer-footer">
+        <div class="composer-toolbar-left">
+          <button class="btn btn-secondary btn-sm" onclick="composerInsertCheckbox()">+ Checklist</button>
+          <button class="btn btn-secondary btn-sm" onclick="composerCleanUrls()">Clean URLs</button>
+          <button class="btn btn-secondary btn-sm" onclick="formatComposerInPlace()">Format</button>
+          <button class="btn btn-secondary btn-sm" onclick="composerCycleCase()">Case</button>
+        </div>
+
+        <div class="composer-toolbar-right">
+          <label class="pin-checkbox-label">
+            <input id="pinOnCreate" type="checkbox" />
+            <span>Pin Note</span>
+          </label>
+          <button class="btn btn-primary btn-sm" onclick="addScratchCard()">Save Note</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- View & Filter Controls Toolbar -->
+    <section class="controls-bar">
+      <!-- Mobile Search Input (Visible on mobile/tablet <= 768px) -->
+      <div class="mobile-search-box">
+        <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="11" cy="11" r="8"></circle>
+          <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+        </svg>
+        <input id="mobileSearchInput" type="text" class="search-input" placeholder="Search notes, payloads..." />
+      </div>
+
+      <div class="filter-pills">
+        <button class="filter-pill active" data-filter="ALL" onclick="setFilter('ALL')">
+          All <span id="countAll" class="pill-counter">0</span>
+        </button>
+        <button class="filter-pill" data-filter="PINNED" onclick="setFilter('PINNED')">
+          Pinned <span id="countPinned" class="pill-counter">0</span>
+        </button>
+        <button class="filter-pill" data-filter="TASKS" onclick="setFilter('TASKS')">
+          Checklists <span id="countTasks" class="pill-counter">0</span>
+        </button>
+        <button class="filter-pill" data-filter="URL" onclick="setFilter('URL')">
+          Clean Links <span id="countUrl" class="pill-counter">0</span>
+        </button>
+        <button class="filter-pill" data-filter="JSON" onclick="setFilter('JSON')">
+          JSON <span id="countJson" class="pill-counter">0</span>
+        </button>
+        <button class="filter-pill" data-filter="SECRET" onclick="setFilter('SECRET')">
+          Credentials <span id="countSecret" class="pill-counter">0</span>
+        </button>
+        <button class="filter-pill" data-filter="TABLE" onclick="setFilter('TABLE')">
+          Tables <span id="countTable" class="pill-counter">0</span>
+        </button>
+        <button class="filter-pill" data-filter="NOTE" onclick="setFilter('NOTE')">
+          Notes <span id="countNote" class="pill-counter">0</span>
+        </button>
+      </div>
+
+      <div class="view-controls">
+        <div class="layout-toggle-group">
+          <button class="layout-toggle-btn active" data-layout="rows" onclick="setLayout('rows')" title="Render Full-Width Rows">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+            <span>Rows</span>
+          </button>
+          <button class="layout-toggle-btn" data-layout="grid" onclick="setLayout('grid')" title="Card Grid">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
+            <span>Grid</span>
+          </button>
+          <button class="layout-toggle-btn" data-layout="split" onclick="setLayout('split')" title="Split Inspector">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="9" y1="3" x2="9" y2="21"></line></svg>
+            <span>Split</span>
+          </button>
+        </div>
+
+        <button class="btn btn-secondary btn-sm btn-sweep" onclick="requestSweepUnpinned()">
+          <span class="btn-text-full">Clear Unpinned</span>
+          <span class="btn-text-short">Clear</span>
+        </button>
+      </div>
+    </section>
+
+    <!-- Note Entries List (Render-style full-width horizontal rows by default) -->
+    <section id="cardsGrid" class="layout-rows"></section>
+  </main>
+
+  <!-- Export Markdown Modal (Render Dialog) -->
+  <div id="exportModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="exportDialogTitle" onclick="if(event.target===this)closeExportModal()">
+    <div class="modal-card dialog-form">
+      <div class="dialog-header">
+        <div class="dialog-title-group">
+          <span class="dialog-tag">EXPORT</span>
+          <h3 id="exportDialogTitle" class="dialog-title">Export Workspace Markdown</h3>
+        </div>
+        <button class="dialog-close-btn" onclick="closeExportModal()" aria-label="Close dialog">×</button>
+      </div>
+      <div class="dialog-body">
+        <textarea id="exportMarkdownArea" class="composer-textarea" rows="12" readonly></textarea>
+      </div>
+      <div class="dialog-footer">
+        <button class="btn btn-secondary btn-sm" onclick="closeExportModal()">Cancel</button>
+        <button id="exportPrimaryBtn" class="btn btn-primary btn-sm" onclick="copyDigestMarkdown()">Copy to Clipboard</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Destructive Confirm Modal -->
+  <div id="confirmModal" class="modal-backdrop" role="alertdialog" aria-modal="true" aria-labelledby="confirmDialogTitle" onclick="if(event.target===this)closeConfirmModal()">
+    <div id="confirmDialogCard" class="modal-card dialog-destructive">
+      <div class="dialog-header">
+        <div class="dialog-title-group">
+          <span class="dialog-tag tag-danger">CONFIRMATION</span>
+          <h3 id="confirmDialogTitle" class="dialog-title">Clear Unpinned Cards</h3>
+        </div>
+        <button class="dialog-close-btn" onclick="closeConfirmModal()" aria-label="Close dialog">×</button>
+      </div>
+      <div class="dialog-body">
+        <p id="confirmDialogBody" class="dialog-message">Remove all unpinned cards from your workspace? Pinned cards will be kept.</p>
+      </div>
+      <div class="dialog-footer">
+        <button class="btn btn-secondary btn-sm" onclick="closeConfirmModal()">Cancel</button>
+        <button id="confirmActionBtn" class="btn btn-danger btn-sm" onclick="confirmModalProceed()">Clear Unpinned</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification Stack -->
+  <div id="toastContainer" class="toast-container"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

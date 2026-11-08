@@ -34,15 +34,29 @@
 
       <div class="navbar-right">
         <button id="privacyToggleBtn" class="btn btn-secondary btn-sm" onclick="togglePrivacyMode()" title="Toggle secret masking">
-          <span id="privacyLabel">Privacy: Off</span>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+          </svg>
+          <span id="privacyLabel">
+            <span class="btn-text-full">Privacy: Off</span>
+            <span class="btn-text-short">Mask</span>
+          </span>
         </button>
 
         <button id="themeToggleBtn" class="btn btn-secondary btn-sm" onclick="toggleContrastTheme()" title="Switch dark/light theme">
+          <svg class="theme-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+          </svg>
           <span class="btn-text-full">Theme: Dark</span>
           <span class="btn-text-short">Dark</span>
         </button>
 
-        <button class="btn btn-primary btn-sm" onclick="openExportModal()">
+        <button class="btn btn-primary btn-sm" onclick="openExportModal()" title="Export workspace markdown">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="7 10 12 15 17 10"></polyline>
+            <line x1="12" y1="15" x2="12" y2="3"></line>
+          </svg>
           <span class="btn-text-full">Export Markdown</span>
           <span class="btn-text-short">Export</span>
         </button>

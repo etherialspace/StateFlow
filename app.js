@@ -1748,22 +1748,117 @@ function normalizeSupabaseUrl(input) {
   return raw.replace(/\/+$/, '');
 }
 
-function saveCloudConfig() {
+async function testCloudConnection() {
+  const rawUrl = document.getElementById('cfgSupabaseUrl')?.value.trim();
+  const rawKey = document.getElementById('cfgSupabaseKey')?.value.trim();
+  const diagBox = document.getElementById('cloudDiagnosticBox');
+  const testBtn = document.getElementById('testConnectionBtn');
+
+  if (!rawUrl || !rawKey) {
+    if (diagBox) {
+      diagBox.className = 'p-3 rounded-xl border border-rose-500/30 bg-rose-500/10 text-rose-600 dark:text-rose-400 text-xs font-mono';
+      diagBox.innerHTML = '❌ Please enter both the Project URL and the API Key.';
+      diagBox.classList.remove('hidden');
+    }
+    return false;
+  }
+
+  const cleanUrl = normalizeSupabaseUrl(rawUrl);
+  if (testBtn) {
+    testBtn.disabled = true;
+    testBtn.textContent = 'Testing...';
+  }
+
+  if (diagBox) {
+    diagBox.className = 'p-3 rounded-xl border border-brand-500/30 bg-brand-500/10 text-brand-600 dark:text-brand-300 text-xs font-mono';
+    diagBox.innerHTML = `⏳ Testing connection to <strong>${escapeHtml(cleanUrl)}</strong>...`;
+    diagBox.classList.remove('hidden');
+  }
+
+  try {
+    if (!window.supabase) {
+      throw new Error('Supabase client library not ready yet. Please check your network.');
+    }
+
+    const testClient = window.supabase.createClient(cleanUrl, rawKey);
+
+    // 1. Test Auth service ping
+    const { data: sessionData, error: sessionErr } = await testClient.auth.getSession();
+    if (sessionErr) {
+      throw new Error(`Auth check failed: ${sessionErr.message}`);
+    }
+
+    // 2. Test database table 'notes'
+    const { data: dbData, error: dbErr } = await testClient.from('notes').select('id').limit(1);
+
+    if (dbErr) {
+      if (dbErr.code === 'PGRST204' || dbErr.message?.includes('relation "public.notes" does not exist') || dbErr.message?.includes('notes')) {
+        diagBox.className = 'p-3 rounded-xl border border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300 text-xs font-mono space-y-1';
+        diagBox.innerHTML = `
+          <div>⚠️ <strong>Auth connected, but table 'notes' is missing!</strong></div>
+          <div>Copy <code>supabase-schema.sql</code> and click <strong>Run</strong> in your Supabase SQL Editor.</div>
+        `;
+        return true;
+      } else {
+        throw new Error(`Database error: ${dbErr.message}`);
+      }
+    }
+
+    // All successful!
+    diagBox.className = 'p-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 text-xs font-mono space-y-1';
+    diagBox.innerHTML = `
+      <div>✅ <strong>Connection successful!</strong></div>
+      <div>Project: <code>${escapeHtml(cleanUrl)}</code></div>
+      <div>Database: Ready with <code>notes</code> table.</div>
+    `;
+    return true;
+  } catch (err) {
+    let helpfulTip = '';
+    if (rawKey.startsWith('sb_publishable_')) {
+      helpfulTip = '<div class="mt-1 text-slate-400">💡 <em>Tip: Your project may require the legacy JWT anon key. In Supabase, click <strong>[View legacy API keys]</strong> and copy the <strong>anon public</strong> key (starts with eyJ...).</em></div>';
+    }
+    if (diagBox) {
+      diagBox.className = 'p-3 rounded-xl border border-rose-500/30 bg-rose-500/10 text-rose-600 dark:text-rose-400 text-xs font-mono space-y-1';
+      diagBox.innerHTML = `
+        <div>❌ <strong>Connection failed:</strong> ${escapeHtml(err.message)}</div>
+        ${helpfulTip}
+      `;
+    }
+    return false;
+  } finally {
+    if (testBtn) {
+      testBtn.disabled = false;
+      testBtn.textContent = 'Test Connection';
+    }
+  }
+}
+
+async function saveCloudConfig() {
   const rawUrl = document.getElementById('cfgSupabaseUrl')?.value.trim();
   const keyIn = document.getElementById('cfgSupabaseKey')?.value.trim();
 
   if (!rawUrl || !keyIn) {
     triggerToast('Please provide both Project URL and API Key');
+    testCloudConnection();
     return;
   }
 
   const cleanUrl = normalizeSupabaseUrl(rawUrl);
+  const ok = await testCloudConnection();
+
   const config = { url: cleanUrl, key: keyIn };
   localStorage.setItem(SUPABASE_CONFIG_KEY, JSON.stringify(config));
-  closeCloudSettingsModal();
   initSupabase();
-  triggerToast('Connected to Supabase! You can now sign in');
-  setTimeout(() => openAuthModal(), 300);
+
+  if (ok) {
+    setTimeout(() => {
+      closeCloudSettingsModal();
+      openAuthModal();
+      triggerToast('Connected! Now sign in with Google or Email');
+    }, 700);
+  } else {
+    triggerToast('Saved settings, but connection check had warnings');
+  }
 }
 
 function resetCloudConfigToOffline() {

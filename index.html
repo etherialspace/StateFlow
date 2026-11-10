@@ -698,31 +698,39 @@
           <label class="block font-mono text-slate-500 mb-1">Supabase Project URL</label>
           <input
             id="cfgSupabaseUrl"
-            type="url"
-            placeholder="https://xyzcompany.supabase.co"
+            type="text"
+            placeholder="https://xyzcompany.supabase.co or your project ref"
             class="w-full bg-slate-50 dark:bg-dark-surface border border-surface-border dark:border-dark-border rounded-xl px-3 py-2 text-xs text-slate-900 dark:text-white font-mono placeholder-slate-400 focus:outline-none focus:border-brand-500"
           />
+          <span class="text-[10px] text-slate-400 font-mono mt-0.5 block">Format: https://&lt;project-id&gt;.supabase.co</span>
         </div>
         <div>
           <label class="block font-mono text-slate-500 mb-1">Anon / Public API Key</label>
           <input
             id="cfgSupabaseKey"
-            type="password"
+            type="text"
             placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
             class="w-full bg-slate-50 dark:bg-dark-surface border border-surface-border dark:border-dark-border rounded-xl px-3 py-2 text-xs text-slate-900 dark:text-white font-mono placeholder-slate-400 focus:outline-none focus:border-brand-500"
           />
+          <span class="text-[10px] text-amber-500/90 font-mono mt-0.5 block">Use the <strong>anon public</strong> key (starts with eyJ...) from [View legacy API keys]</span>
         </div>
+
+        <!-- Connection Diagnostic Output -->
+        <div id="cloudDiagnosticBox" class="hidden p-3 rounded-xl border text-xs font-mono space-y-1.5 transition-all"></div>
+
         <div class="p-2.5 rounded-lg bg-surface-subtle dark:bg-dark-surface/60 border border-surface-border dark:border-dark-border text-[11px] text-slate-500 font-mono space-y-1">
-          <div>💡 <strong>Quick Setup:</strong></div>
-          <div>1. Open <a href="https://supabase.com" target="_blank" class="text-brand-500 underline">supabase.com</a> and create a project</div>
-          <div>2. Paste <code>supabase-schema.sql</code> into SQL Editor</div>
-          <div>3. Under Auth &rarr; Providers, toggle <strong>Google</strong> enabled</div>
-          <div>4. Copy your URL &amp; Anon Key from Settings &rarr; API</div>
+          <div>💡 <strong>How to get both in 10 seconds:</strong></div>
+          <div>1. <strong>Project URL:</strong> Look at your browser URL bar &rarr; copy the text after <code>/project/</code> &rarr; <code>https://&lt;id&gt;.supabase.co</code></div>
+          <div>2. <strong>API Key:</strong> On your Supabase screen, click <strong>[View legacy API keys]</strong> &rarr; copy <strong>anon public</strong> (starts with <code>eyJ...</code>)</div>
+          <div>3. <strong>Database:</strong> Paste <code>supabase-schema.sql</code> into Supabase SQL Editor and click Run</div>
         </div>
       </div>
       <div class="px-5 py-3.5 bg-surface-subtle/50 dark:bg-dark-surface/40 border-t border-surface-border dark:border-dark-border flex items-center justify-between">
-        <button onclick="resetCloudConfigToOffline()" class="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-200">Reset to Offline Only</button>
-        <button onclick="saveCloudConfig()" class="px-4 py-2 rounded-xl text-xs font-semibold text-white bg-brand-600 hover:bg-brand-500 shadow-sm">Save &amp; Connect</button>
+        <button onclick="resetCloudConfigToOffline()" class="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-200">Reset to Offline</button>
+        <div class="flex items-center gap-2">
+          <button id="testConnectionBtn" onclick="testCloudConnection()" class="px-3 py-2 rounded-xl text-xs font-medium text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-dark-surface border border-surface-border dark:border-dark-border hover:bg-slate-200 dark:hover:bg-dark-cardHover transition-colors">Test Connection</button>
+          <button id="saveConnectBtn" onclick="saveCloudConfig()" class="px-4 py-2 rounded-xl text-xs font-semibold text-white bg-brand-600 hover:bg-brand-500 shadow-sm transition-all">Save &amp; Connect</button>
+        </div>
       </div>
     </div>
   </div>

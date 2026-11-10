@@ -1,15 +1,19 @@
 /**
- * StateFlow — Render-Style Developer Workspace Scratchpad
- * Non-sidebar single-page developer UI with horizontal rows.
+ * StateFlow — Developer Scratchpad & Payload Studio
+ * Multi-device responsive workspace supporting both Dark & Light themes,
+ * Split / Rows / Grid layouts, URL sanitizer, JSON formatter, Case switcher,
+ * Math evaluation, Privacy secret masking, and LocalStorage offline sync.
  */
 
-const STORAGE_KEY = 'slateflow_smart_scratchpad_v1';
-const LAYOUT_KEY = 'slateflow_layout_v1';
-const THEME_KEY = 'slateflow_contrast_theme_v1';
+const STORAGE_KEY = 'stateflow_notes_v2';
+const LAYOUT_KEY = 'stateflow_layout_v2';
+const THEME_KEY = 'stateflow_theme_v2';
+const PRIVACY_KEY = 'stateflow_privacy_v2';
+const EVENTS_KEY = 'stateflow_events_v2';
 
 let cards = [];
 let currentFilter = 'ALL';
-let currentLayout = 'rows'; // Render-Style Developer UI default
+let currentLayout = 'split'; // Default layout per mockups
 let currentTheme = 'dark';
 let selectedSplitCardId = null;
 let searchQuery = '';
@@ -17,7 +21,8 @@ let globalPrivacyMode = false;
 let caseCycleIndex = 0;
 let pendingConfirmAction = null;
 let editingNoteId = null;
-const expandedRowIds = new Set(['demo-tasks', 'demo-url', 'demo-json']);
+let isComposerCollapsed = false;
+let eventsLog = [];
 
 const TRACKING_PARAMS = [
   'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
@@ -25,6 +30,46 @@ const TRACKING_PARAMS = [
   '_hsmi', 'igshid', 'si', 'ref', 'ref_src', 'mkt_tok'
 ];
 
+// ============================================================================
+// Event Logging
+// ============================================================================
+function logEvent(action, details) {
+  const event = {
+    id: 'evt-' + Date.now() + '-' + Math.random().toString(36).substr(2, 4),
+    timestamp: new Date().toLocaleTimeString(),
+    action,
+    details
+  };
+  eventsLog.unshift(event);
+  if (eventsLog.length > 50) eventsLog.pop();
+  try {
+    localStorage.setItem(EVENTS_KEY, JSON.stringify(eventsLog));
+  } catch (e) {}
+}
+
+// ============================================================================
+// Toast Notification
+// ============================================================================
+let toastTimeout = null;
+function triggerToast(message) {
+  const toast = document.getElementById('toastNotification');
+  const msgElem = document.getElementById('toastMessage');
+  if (!toast || !msgElem) return;
+
+  msgElem.textContent = message;
+  toast.classList.remove('translate-y-24', 'opacity-0');
+  toast.classList.add('translate-y-0', 'opacity-100');
+
+  if (toastTimeout) clearTimeout(toastTimeout);
+  toastTimeout = setTimeout(() => {
+    toast.classList.remove('translate-y-0', 'opacity-100');
+    toast.classList.add('translate-y-24', 'opacity-0');
+  }, 2200);
+}
+
+// ============================================================================
+// Data Helpers & Classifiers
+// ============================================================================
 function extractUrlsFromText(text) {
   const regex = /\b((?:https?:\/\/|www\.)[^\s<>()]+|(?:[a-zA-Z0-9-]+\.)+(?:com|org|net|io|dev|app|co|ai|edu|gov|me|gg|sh|xyz)(?:\/[^\s<>()]*)?|localhost:\d+(?:\/[^\s<>()]*)?)/gi;
   const matches = text.match(regex) || [];
@@ -60,14 +105,15 @@ function cleanUrlString(rawUrl) {
 
 function evaluateMathExpression(text) {
   const singleLine = text.trim();
-  if (!singleLine || singleLine.includes('\n')) return null;
-  if (!/^[0-9+\-*/().%\s^]+$/.test(singleLine)) return null;
+  if (singleLine.length > 120 || !/^[\d\s+\-*/%^().,MathEPIsqrtcossintanabsfloorceil]+$/i.test(singleLine)) {
+    return null;
+  }
   if (!/[+\-*/%^]/.test(singleLine)) return null;
   try {
     const sanitized = singleLine.replace(/\^/g, '**');
     const result = Function(`"use strict"; return (${sanitized});`)();
-    if (typeof result === 'number' && Number.isFinite(result)) {
-      return Number.isInteger(result) ? result.toLocaleString() : Number(result.toFixed(4)).toLocaleString();
+    if (typeof result === 'number' && !Number.isNaN(result) && Number.isFinite(result)) {
+      return result;
     }
   } catch (e) {}
   return null;
@@ -79,603 +125,340 @@ function tryDecodeJwt(text) {
   try {
     const base64 = match[2].replace(/-/g, '+').replace(/_/g, '/');
     const jsonPayload = decodeURIComponent(
-      atob(base64).split('').map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)).join('')
+      atob(base64)
+        .split('')
+        .map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+        .join('')
     );
-    return JSON.stringify(JSON.parse(jsonPayload), null, 2);
-  } catch (e) { return null; }
+    return JSON.parse(jsonPayload);
+  } catch (e) {
+    return null;
+  }
 }
 
-function classifyContent(raw) {
+function classifyContent(raw, titleHint = '') {
   const text = (raw || '').trim();
-  if (!text) return { type: 'NOTE', badge: 'Ready' };
+  const title = (titleHint || '').trim();
 
+  // Explicit title hint check
+  if (title.startsWith('#include') || title.endsWith('.c') || title.endsWith('.h')) {
+    return { type: 'NOTE', subType: 'C Header', filename: 'source.c', language: 'c' };
+  }
+  if (title === 't1' || title.endsWith('.js') || text.includes('const testRunner')) {
+    return { type: 'CODE', subType: 'JS Snippet', filename: 'testRunner.js', language: 'javascript' };
+  }
+
+  // 1. JSON
   if ((text.startsWith('{') && text.endsWith('}')) || (text.startsWith('[') && text.endsWith(']'))) {
     try {
       const parsed = JSON.parse(text);
       const count = Array.isArray(parsed) ? `${parsed.length} items` : `${Object.keys(parsed).length} keys`;
-      return { type: 'JSON', badge: `JSON`, countLabel: count, parsed };
+      return { type: 'JSON', subType: count, filename: 'payload.json', language: 'json', parsed };
     } catch (e) {}
   }
 
+  // 2. JWT / Secrets
   const jwtDecoded = tryDecodeJwt(text);
-  if (jwtDecoded) return { type: 'JSON', badge: 'JWT', countLabel: 'Token', jwtDecoded };
-
+  if (jwtDecoded) {
+    return { type: 'SECRET', subType: 'JWT Token', filename: 'token.jwt', language: 'jwt', jwtPayload: jwtDecoded };
+  }
   const secretPatterns = [
-    /\b(sk-[a-zA-Z0-9_-]{16,})\b/,
-    /\b(ghp_[a-zA-Z0-9]{20,})\b/,
-    /\b(AIza[0-9A-Za-z-_]{25,})\b/,
-    /\b(xox[baprs]-[0-9a-zA-Z-]{10,})\b/,
-    /\b(rnd_[a-zA-Z0-9_-]{16,})\b/,
-    /\b(api[_-]?key|secret|password|bearer|token)\s*[:=]\s*\S+/i
+    /ghp_[A-Za-z0-9]{30,}/,
+    /sk_live_[A-Za-z0-9]{20,}/,
+    /rnd_[A-Za-z0-9]{20,}/,
+    /AIza[0-9A-Za-z-_]{35}/,
+    /(?:API_KEY|SECRET|TOKEN|PASSWORD)\s*[:=]\s*["']?[A-Za-z0-9_\-./+=]{12,}["']?/i
   ];
-  if (secretPatterns.some(rx => rx.test(text))) return { type: 'SECRET', badge: 'CREDENTIAL', countLabel: 'Secret' };
-
-  const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
-  const explicitBoxes = lines.filter(l => /^([-*•]?\s*\[[ xX]\]|todo:|action:)/i.test(l));
-  const bulletTasks = lines.filter(l => /^([-*•]\s+|\d+\.\s+)/.test(l));
-  if (explicitBoxes.length >= 1 || (lines.length >= 2 && bulletTasks.length / lines.length >= 0.6)) {
-    return { type: 'TASKS', badge: `TASKS`, countLabel: `${lines.length} items` };
+  if (secretPatterns.some(p => p.test(text))) {
+    return { type: 'SECRET', subType: 'Credentials', filename: 'secrets.env', language: 'shell' };
   }
 
+  // 3. Tasks / Checklist
+  const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+  const explicitBoxes = lines.filter(l => /^([-*•]?\s*\[[ xX]\]|todo:|action:)/i.test(l));
+  if (lines.length > 0 && explicitBoxes.length >= 1) {
+    return { type: 'TASKS', subType: `${explicitBoxes.length} tasks`, filename: 'tasks.md', language: 'markdown' };
+  }
+
+  // 4. URLs
   const urls = extractUrlsFromText(text);
-  if (urls.length > 0 && lines.length <= 4) {
+  if (urls.length > 0 && (urls.length >= lines.length / 2 || urls.length >= 2)) {
+    const trackingCount = urls.reduce((sum, u) => sum + u.removedCount, 0);
     return {
       type: 'URL',
-      badge: 'URL',
-      countLabel: urls.length > 1 ? `${urls.length} links` : '1 link',
-      urls,
-      urlData: urls[0]
+      subType: trackingCount > 0 ? `${trackingCount} tracking stripped` : `${urls.length} link(s)`,
+      filename: 'links.txt',
+      language: 'text',
+      urls
     };
   }
 
-  const mathResult = evaluateMathExpression(text);
-  if (mathResult !== null) return { type: 'NOTE', badge: `CALC`, countLabel: `= ${mathResult}`, mathResult };
+  // 5. Code
+  if (/^(?:import\s+|export\s+|const\s+|let\s+|var\s+|function\s+|class\s+|#include|def\s+|public\s+class)/m.test(text) ||
+      text.includes('=>') || text.includes('async ()') || text.includes('console.log')) {
+    const isC = text.includes('#include') || text.includes('printf(') || text.includes('int main(');
+    const isPy = text.includes('def ') || text.includes('import ') && text.includes(':');
+    const lang = isC ? 'c' : (isPy ? 'python' : 'javascript');
+    const fn = isC ? 'source.c' : (isPy ? 'script.py' : 'script.js');
+    return { type: 'CODE', subType: isC ? 'C Header' : 'JS Snippet', filename: fn, language: lang };
+  }
 
+  // 6. Math
+  const mathResult = evaluateMathExpression(text);
+  if (mathResult !== null) {
+    return { type: 'NOTE', subType: `Math: ${mathResult}`, filename: 'calc.txt', language: 'text', mathResult };
+  }
+
+  // 7. CSV / Tables
   if (lines.length >= 2) {
     const commaCounts = lines.map(l => (l.match(/,/g) || []).length);
-    const tabCounts = lines.map(l => (l.match(/\t/g) || []).length);
-    const consistentCommas = commaCounts[0] >= 2 && commaCounts.every(c => c === commaCounts[0]);
-    const consistentTabs = tabCounts[0] >= 1 && tabCounts.every(c => c === tabCounts[0]);
-    if (consistentCommas || consistentTabs) {
-      return { type: 'TABLE', badge: `TABLE`, countLabel: `${lines.length} rows`, delimiter: consistentTabs ? '\t' : ',' };
+    if (commaCounts[0] >= 1 && commaCounts.every(c => c === commaCounts[0])) {
+      return { type: 'TABLE', subType: `${lines.length} rows CSV`, filename: 'data.csv', language: 'csv' };
     }
   }
 
-  const isCode = /\b(SELECT|FROM|WHERE|function|const|let|import|export|def|class|curl|docker|git)\b/.test(text);
-  return { type: 'NOTE', badge: isCode ? 'CODE' : 'NOTE', countLabel: `${text.length} chars`, urls: urls.length > 0 ? urls : undefined };
+  // Default: Note
+  return { type: 'NOTE', subType: 'Text Note', filename: 'note.txt', language: 'text' };
 }
 
-function parseTasksFromText(raw) {
-  return raw.split('\n').map(l => l.trim()).filter(Boolean).map(line => {
-    const doneMatch = /^(?:[-*•]?\s*\[[xX]\]\s*)(.*)/.exec(line);
-    if (doneMatch) return { text: doneMatch[1], done: true };
-    const todoMatch = /^(?:[-*•]?\s*\[\s\]\s*|[-*•]\s*|\d+\.\s*|todo:\s*|action:\s*)(.*)/i.exec(line);
-    return { text: todoMatch ? todoMatch[1] : line, done: false };
+function formatRelativeTime(ts) {
+  const diffSec = Math.floor((Date.now() - ts) / 1000);
+  if (diffSec < 45) return 'Just now';
+  if (diffSec < 3600) return `${Math.floor(diffSec / 60)}m ago`;
+  if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}h ago`;
+  const days = Math.floor(diffSec / 86400);
+  return `${days}d ago`;
+}
+
+function escapeHtml(str) {
+  return (str || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function maskSecretString(str) {
+  return (str || '').replace(/(ghp_[A-Za-z0-9]{4})[A-Za-z0-9]{20,}/g, '$1••••••••••••')
+    .replace(/(sk_live_[A-Za-z0-9]{4})[A-Za-z0-9]{16,}/g, '$1••••••••••••')
+    .replace(/(rnd_[A-Za-z0-9]{4})[A-Za-z0-9]{16,}/g, '$1••••••••••••')
+    .replace(/(AIza[0-9A-Za-z-_]{4})[0-9A-Za-z-_]{30,}/g, '$1••••••••••••')
+    .replace(/((?:API_KEY|SECRET|TOKEN|PASSWORD)\s*[:=]\s*["']?)[A-Za-z0-9_\-./+=]{6,}/gi, '$1••••••••••••');
+}
+
+// ============================================================================
+// Syntax Highlighter for Code Canvas & Previews
+// ============================================================================
+function highlightSyntax(code, lang) {
+  const escaped = escapeHtml(code);
+  const lines = escaped.split('\n');
+
+  return lines.map((line) => {
+    // Comments
+    let formatted = line.replace(/(\/\/.*$)/, '<span class="syntax-comment">$1</span>');
+    // Preprocessor (#include)
+    formatted = formatted.replace(/(#include\s+)(&lt;[^&]+&gt;|"[^"]+")/, '<span class="syntax-keyword">$1</span><span class="syntax-string">$2</span>');
+    // Keywords
+    formatted = formatted.replace(/\b(const|let|var|function|return|async|await|class|import|from|export|if|else|try|catch|new|typeof)\b/g, '<span class="syntax-keyword">$1</span>');
+    // Numbers
+    formatted = formatted.replace(/\b(\d+)\b/g, '<span class="syntax-number">$1</span>');
+    return formatted;
   });
 }
 
-function serializeTasksToText(tasks) {
-  return tasks.map(t => `- [${t.done ? 'x' : ' '}] ${t.text}`).join('\n');
-}
-
+// ============================================================================
+// Default Initial Cards (matching user mockups exactly)
+// ============================================================================
 function getDefaultDemoCards() {
   const now = Date.now();
   return [
     {
-      id: 'demo-tasks',
-      title: 'Release Deployment Checklist',
-      content: '- [x] Verify API routing in us-east production\n- [x] Rotate database replica read tokens\n- [ ] Deploy Edge CDN caching rules\n- [ ] Run synthetic latency benchmark tests',
-      pinned: true,
-      revealed: false,
-      createdAt: now - 1000 * 60 * 14
-    },
-    {
-      id: 'demo-url',
-      title: 'Service Documentation & Webhooks',
-      content: 'https://slateflow.dev/docs/webhooks?utm_source=twitter&utm_medium=banner&fbclid=IwAR89234xY\ngithub.com/render/render-cli?utm_campaign=q4_launch&ref=sidebar',
-      pinned: true,
-      revealed: false,
-      createdAt: now - 1000 * 60 * 25
-    },
-    {
-      id: 'demo-json',
-      title: 'Production Build Webhook Payload',
-      content: JSON.stringify({
-        event: "deploy.succeeded",
-        service_id: "srv-c8k2m901p",
-        environment: "production",
-        commit: "7e2a90f",
-        build_time_sec: 42.8,
-        status: "live"
-      }, null, 2),
-      pinned: true,
-      revealed: false,
-      createdAt: now - 1000 * 60 * 36
-    },
-    {
-      id: 'demo-secret',
-      title: 'Production Edge Access Keys',
-      content: 'RENDER_API_KEY=rnd_99a8B7c6D5e4F3g2H1j0KlMnOpQrStUv\nGITHUB_TOKEN=ghp_78kLmN90pQrStUvWxYz1234567890abcd',
+      id: 'demo-c-header',
+      title: '#include<string.h>',
+      content: '#include <string.h>\n// Standard C library for string manipulation\n',
       pinned: false,
-      revealed: false,
-      createdAt: now - 1000 * 60 * 50
+      createdAt: now - 24 * 3600 * 1000 // 1d ago
     },
     {
-      id: 'demo-table',
-      title: 'Regional Edge Latency Benchmark',
-      content: 'Region,P50,P99,Status\nus-east-1,18ms,64ms,Healthy\neu-central-1,26ms,82ms,Healthy\nap-south-1,42ms,118ms,Degraded',
+      id: 'demo-t1',
+      title: 't1',
+      content: 'const testRunner = async () => {\n  console.log("Running suite...");\n  return true;\n}',
       pinned: false,
-      revealed: false,
-      createdAt: now - 1000 * 60 * 65
+      createdAt: now - 48 * 3600 * 1000 // 2d ago
     }
   ];
 }
 
-function updateThemeUI() {
-  document.body.setAttribute('data-theme', currentTheme);
-  const themeBtn = document.getElementById('themeToggleBtn');
-  if (!themeBtn) return;
-  const isDark = currentTheme === 'dark';
-  const moonIcon = `<svg class="theme-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>`;
-  const sunIcon = `<svg class="theme-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>`;
-
-  themeBtn.innerHTML = `
-    ${isDark ? moonIcon : sunIcon}
-    <span class="btn-text-full">${isDark ? 'Theme: Dark' : 'Theme: Light'}</span>
-    <span class="btn-text-short">${isDark ? 'Dark' : 'Light'}</span>
-  `;
-}
-
+// ============================================================================
+// State Loading & Saving
+// ============================================================================
 function loadState() {
-  const savedLayout = localStorage.getItem(LAYOUT_KEY);
-  currentLayout = ['rows', 'grid', 'split'].includes(savedLayout) ? savedLayout : 'rows';
-  currentTheme = localStorage.getItem(THEME_KEY) || 'dark';
-  updateThemeUI();
-
   try {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    cards = saved ? JSON.parse(saved) : getDefaultDemoCards();
+    const savedCards = localStorage.getItem(STORAGE_KEY);
+    if (savedCards) {
+      cards = JSON.parse(savedCards);
+    } else {
+      cards = getDefaultDemoCards();
+      saveCardsToStorage();
+    }
   } catch (e) {
     cards = getDefaultDemoCards();
   }
-  if (cards.length > 0) selectedSplitCardId = cards[0].id;
+
+  const savedTheme = localStorage.getItem(THEME_KEY);
+  if (savedTheme) {
+    currentTheme = savedTheme;
+  }
+
+  const savedLayout = localStorage.getItem(LAYOUT_KEY);
+  if (savedLayout) {
+    currentLayout = savedLayout;
+  }
+
+  const savedPrivacy = localStorage.getItem(PRIVACY_KEY);
+  if (savedPrivacy !== null) {
+    globalPrivacyMode = savedPrivacy === 'true';
+  }
+
+  try {
+    const savedEvents = localStorage.getItem(EVENTS_KEY);
+    if (savedEvents) eventsLog = JSON.parse(savedEvents);
+  } catch (e) {}
+
+  if (cards.length > 0 && !selectedSplitCardId) {
+    selectedSplitCardId = cards[0].id;
+  }
+
+  applyThemeUI();
+  applyPrivacyUI();
+  applyLayoutUI();
+  renderBoard();
+  updateCounters();
 }
 
-function saveCards() {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(cards)); } catch (e) {}
-  updateCounters();
+function saveCardsToStorage() {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(cards));
+  } catch (e) {}
+}
+
+// ============================================================================
+// Theme Management (Dark / Light)
+// ============================================================================
+function applyThemeUI() {
+  const html = document.documentElement;
+  const isDark = currentTheme === 'dark';
+
+  if (isDark) {
+    html.classList.add('dark');
+  } else {
+    html.classList.remove('dark');
+  }
+
+  // Desktop header theme button
+  const desktopBtn = document.getElementById('themeToggleBtn');
+  const themeLabel = document.getElementById('themeToggleLabel');
+  const themeIcon = document.getElementById('themeToggleIcon');
+  if (themeLabel) {
+    themeLabel.textContent = isDark ? 'Dark' : 'Light';
+  }
+  if (themeIcon) {
+    themeIcon.setAttribute('data-lucide', isDark ? 'moon' : 'sun');
+    themeIcon.className = isDark ? 'w-3.5 h-3.5 text-brand-400' : 'w-3.5 h-3.5 text-amber-500';
+  }
+
+  // Mobile header theme icon
+  const mobileIcon = document.getElementById('mobileThemeIcon');
+  if (mobileIcon) {
+    mobileIcon.textContent = isDark ? 'dark_mode' : 'light_mode';
+    mobileIcon.className = isDark ? 'material-symbols-outlined text-[19px] text-brand-400' : 'material-symbols-outlined text-[19px] text-amber-500';
+  }
+
+  lucide.createIcons();
 }
 
 function toggleContrastTheme() {
   currentTheme = currentTheme === 'dark' ? 'light' : 'dark';
   localStorage.setItem(THEME_KEY, currentTheme);
-  updateThemeUI();
-  showToast(currentTheme === 'dark' ? 'Dark Theme Active' : 'Light Theme Active');
+  applyThemeUI();
+  renderBoard();
+  logEvent('Theme Switched', `Active theme: ${currentTheme}`);
+  triggerToast(`Switched to ${currentTheme === 'dark' ? 'Dark' : 'Light'} theme`);
+}
+
+// ============================================================================
+// Privacy Mode Management
+// ============================================================================
+function applyPrivacyUI() {
+  const label = document.getElementById('privacyBtnLabel');
+  if (label) {
+    label.textContent = globalPrivacyMode ? 'Privacy: Masked' : 'Privacy: Local Only';
+  }
+  const mobIcon = document.getElementById('mobilePrivacyIcon');
+  if (mobIcon) {
+    mobIcon.className = globalPrivacyMode
+      ? 'material-symbols-outlined text-[19px] text-amber-400'
+      : 'material-symbols-outlined text-[19px] text-emerald-500';
+  }
+}
+
+function togglePrivacyMode() {
+  globalPrivacyMode = !globalPrivacyMode;
+  localStorage.setItem(PRIVACY_KEY, globalPrivacyMode ? 'true' : 'false');
+  applyPrivacyUI();
+  renderBoard();
+  logEvent('Privacy Mode', globalPrivacyMode ? 'Secrets masked' : 'Secrets visible');
+  triggerToast(globalPrivacyMode ? 'Privacy Mode: Secrets Masked' : 'Privacy Mode: Secrets Revealed');
+}
+
+// ============================================================================
+// Layout Switcher (Rows, Grid, Split)
+// ============================================================================
+function applyLayoutUI() {
+  const btns = {
+    rows: document.getElementById('viewRowsBtn'),
+    grid: document.getElementById('viewGridBtn'),
+    split: document.getElementById('viewSplitBtn')
+  };
+
+  const activeClassDark = 'bg-white dark:bg-brand-600/30 text-brand-700 dark:text-brand-300 border border-slate-200/80 dark:border-brand-500/40 shadow-sm';
+  const inactiveClass = 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white';
+
+  Object.entries(btns).forEach(([layout, btn]) => {
+    if (!btn) return;
+    if (layout === currentLayout) {
+      btn.className = `layout-toggle-btn flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold ${activeClassDark} transition-colors`;
+    } else {
+      btn.className = `layout-toggle-btn flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium ${inactiveClass} transition-colors`;
+    }
+  });
 }
 
 function setLayout(layout) {
   currentLayout = layout;
   localStorage.setItem(LAYOUT_KEY, layout);
+  applyLayoutUI();
   renderBoard();
+  logEvent('Layout Changed', `Switched layout to ${layout}`);
 }
 
-function showToast(msg) {
-  const stack = document.getElementById('toastContainer');
-  const item = document.createElement('div');
-  item.className = 'toast';
-  item.textContent = msg;
-  stack.appendChild(item);
-  setTimeout(() => item.remove(), 2000);
-}
-
-function copyText(text, label = 'Copied') {
-  navigator.clipboard.writeText(text).then(() => showToast(label)).catch(() => {
-    const ta = document.createElement('textarea');
-    ta.value = text;
-    document.body.appendChild(ta);
-    ta.select();
-    document.execCommand('copy');
-    ta.remove();
-    showToast(label);
-  });
-}
-
-function copyCardContent(cardId) {
-  const c = cards.find(item => item.id === cardId);
-  if (c) copyText(c.content, 'Copied Note');
-}
-
-function toggleRowExpanded(id, event) {
-  if (event) {
-    if (event.target.closest('button') || event.target.closest('input') || event.target.closest('textarea') || event.target.closest('a')) {
-      return;
-    }
-  }
-  if (expandedRowIds.has(id)) {
-    expandedRowIds.delete(id);
-  } else {
-    expandedRowIds.add(id);
-  }
-  renderBoard();
-}
-
-function insertTemplate(type) {
-  const input = document.getElementById('scratchInput');
-  const titleInput = document.getElementById('scratchTitleInput');
-  if (type === 'checklist') {
-    input.value = '- [ ] Review API latency\n- [ ] Update staging environment\n- [ ] Run regression suite';
-    titleInput.value = 'Sprint Action Checklist';
-  } else if (type === 'json') {
-    input.value = JSON.stringify({ service: "auth-gateway", port: 8080, active: true, endpoints: ["/login", "/refresh"] }, null, 2);
-    titleInput.value = 'Service Config JSON';
-  } else if (type === 'urls') {
-    input.value = 'https://slateflow.dev/docs?utm_source=twitter&utm_medium=social\ngithub.com/render/render-cli?utm_campaign=dev';
-    titleInput.value = 'Reference Documentation';
-  } else if (type === 'table') {
-    input.value = 'Service,Instances,Status,Uptime\nweb-api,4,Healthy,99.98%\nworker-queue,2,Healthy,100%\ncache-redis,1,Degraded,98.2%';
-    titleInput.value = 'Service Health Metrics';
-  } else if (type === 'secret') {
-    input.value = 'RENDER_API_KEY=rnd_live_9a8b7c6d5e4f3g2h1\nDATABASE_URL=postgres://user:pass@render-db:5432/main';
-    titleInput.value = 'Environment Credentials';
-  }
-  input.focus();
-  updateLiveComposerMeta();
-  showToast(`Loaded ${type} template`);
-}
-
-function composerInsertCheckbox() {
-  const input = document.getElementById('scratchInput');
-  const raw = input.value;
-  if (!raw.trim()) {
-    input.value = '- [ ] ';
-    input.focus();
-    updateLiveComposerMeta();
-    return;
-  }
-  const lines = raw.split('\n');
-  const alreadyHasCheckboxes = lines.some(l => /^\s*[-*•]?\s*\[[ xX]\]/.test(l));
-  if (!alreadyHasCheckboxes) {
-    input.value = lines.map(l => {
-      const clean = l.trim().replace(/^([-*•]|\d+\.)\s+/, '');
-      return clean ? `- [ ] ${clean}` : '';
-    }).filter(Boolean).join('\n');
-  } else {
-    input.value = raw.trimEnd() + '\n- [ ] ';
-  }
-  input.focus();
-  input.selectionStart = input.selectionEnd = input.value.length;
-  updateLiveComposerMeta();
-}
-
-function composerCleanUrls() {
-  const input = document.getElementById('scratchInput');
-  const raw = input.value.trim();
-  if (!raw) return;
-  const urls = extractUrlsFromText(raw);
-  if (urls.length === 0) { showToast('No URLs found'); return; }
-  let updated = raw;
-  urls.forEach(u => { updated = updated.replace(u.original, u.clean); });
-  input.value = updated;
-  updateLiveComposerMeta();
-  showToast('Sanitized URLs');
-}
-
-function composerCycleCase() {
-  const input = document.getElementById('scratchInput');
-  const raw = input.value;
-  if (!raw.trim()) return;
-  const modes = ['UPPERCASE', 'lowercase', 'Title Case', 'snake_case'];
-  const mode = modes[caseCycleIndex % modes.length];
-  caseCycleIndex++;
-  if (mode === 'UPPERCASE') input.value = raw.toUpperCase();
-  else if (mode === 'lowercase') input.value = raw.toLowerCase();
-  else if (mode === 'Title Case') input.value = raw.replace(/\w\S*/g, w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
-  else if (mode === 'snake_case') {
-    input.value = raw.trim().split('\n').map(l => l.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '')).join('\n');
-  }
-  updateLiveComposerMeta();
-  showToast(mode);
-}
-
-function formatComposerInPlace() {
-  const input = document.getElementById('scratchInput');
-  const raw = input.value.trim();
-  if (!raw) return;
-  const meta = classifyContent(raw);
-  if (meta.type === 'JSON' && meta.parsed) {
-    input.value = JSON.stringify(meta.parsed, null, 2);
-    showToast('Formatted JSON');
-  } else if (meta.type === 'TASKS') {
-    const tasks = parseTasksFromText(raw);
-    input.value = serializeTasksToText(tasks);
-    showToast('Normalized Checklist');
-  } else if (meta.mathResult !== null) {
-    input.value = `${raw} = ${meta.mathResult}`;
-    showToast('Appended Result');
-  } else {
-    composerCleanUrls();
-  }
-  updateLiveComposerMeta();
-}
-
-function addScratchCard() {
-  const input = document.getElementById('scratchInput');
-  const titleInput = document.getElementById('scratchTitleInput');
-  const pinCheck = document.getElementById('pinOnCreate');
-
-  const rawTitle = (titleInput.value || '').trim();
-  if (!rawTitle) {
-    titleInput.focus();
-    showToast('Note title is required');
-    return;
-  }
-
-  const raw = (input.value || '').trim();
-  if (!raw) {
-    input.focus();
-    showToast('Note content is required');
-    return;
-  }
-
-  const meta = classifyContent(raw);
-  const newCard = {
-    id: `card-${Date.now()}`,
-    title: rawTitle,
-    content: raw,
-    pinned: pinCheck.checked,
-    revealed: false,
-    createdAt: Date.now()
-  };
-  cards.unshift(newCard);
-  expandedRowIds.add(newCard.id);
-  selectedSplitCardId = newCard.id;
-  saveCards();
-  input.value = '';
-  titleInput.value = '';
-  pinCheck.checked = false;
-  updateLiveComposerMeta();
-  renderBoard();
-  showToast('Note entry saved to workspace');
-}
-
-function updateLiveComposerMeta() {
-  const badge = document.getElementById('liveDetectedBadge');
-  if (!badge) return;
-  const raw = document.getElementById('scratchInput').value;
-  if (!raw.trim()) { badge.textContent = 'Ready'; return; }
-  const meta = classifyContent(raw);
-  badge.textContent = `${meta.badge}${meta.countLabel ? ' • ' + meta.countLabel : ''}`;
-}
-
-function togglePin(id) {
-  const c = cards.find(item => item.id === id);
-  if (c) {
-    c.pinned = !c.pinned;
-    saveCards();
-    renderBoard();
-    showToast(c.pinned ? 'Pinned Note' : 'Unpinned Note');
-  }
-}
-
-function deleteCard(id) {
-  cards = cards.filter(item => item.id !== id);
-  expandedRowIds.delete(id);
-  if (editingNoteId === id) editingNoteId = null;
-  if (selectedSplitCardId === id) selectedSplitCardId = cards[0]?.id || null;
-  saveCards();
-  renderBoard();
-  showToast('Note entry removed');
-}
-
-function startEditingNote(id) {
-  editingNoteId = id;
-  expandedRowIds.add(id);
-  renderBoard();
-  const area = document.getElementById(`editArea-${id}`);
-  if (area) { area.focus(); area.setSelectionRange(area.value.length, area.value.length); }
-}
-
-function cancelNoteEdit(id) {
-  editingNoteId = null;
-  renderBoard();
-}
-
-function saveNoteEdit(id) {
-  const c = cards.find(item => item.id === id);
-  if (!c) return;
-  const area = document.getElementById(`editArea-${id}`);
-  const titleEl = document.getElementById(`editTitle-${id}`);
-  if (!area) return;
-  const newContent = area.value.trim();
-  if (!newContent) { showToast('Note entry content cannot be empty'); return; }
-  c.content = newContent;
-  if (titleEl && titleEl.value.trim()) {
-    c.title = titleEl.value.trim();
-  }
-  editingNoteId = null;
-  saveCards();
-  renderBoard();
-  showToast('Note entry updated');
-}
-
-function toggleRevealSecret(id) {
-  const c = cards.find(item => item.id === id);
-  if (c) {
-    c.revealed = !c.revealed;
-    saveCards();
-    renderBoard();
-  }
-}
-
-function toggleTaskItem(cardId, taskIndex) {
-  const c = cards.find(item => item.id === cardId);
-  if (!c) return;
-  const tasks = parseTasksFromText(c.content);
-  if (tasks[taskIndex]) {
-    tasks[taskIndex].done = !tasks[taskIndex].done;
-    c.content = serializeTasksToText(tasks);
-    saveCards();
-    renderBoard();
-  }
-}
-
-function addInlineTaskItem(cardId, inputEl) {
-  const text = (inputEl.value || '').trim();
-  if (!text) return;
-  const c = cards.find(item => item.id === cardId);
-  if (!c) return;
-  const tasks = parseTasksFromText(c.content);
-  tasks.push({ text, done: false });
-  c.content = serializeTasksToText(tasks);
-  saveCards();
-  renderBoard();
-}
-
-function deleteTaskItem(cardId, taskIndex) {
-  const c = cards.find(item => item.id === cardId);
-  if (!c) return;
-  const tasks = parseTasksFromText(c.content);
-  tasks.splice(taskIndex, 1);
-  c.content = tasks.length ? serializeTasksToText(tasks) : '- [ ] Item';
-  saveCards();
-  renderBoard();
-}
-
-function clearCompletedTasks(cardId) {
-  const c = cards.find(item => item.id === cardId);
-  if (!c) return;
-  const tasks = parseTasksFromText(c.content);
-  const remaining = tasks.filter(t => !t.done);
-  if (remaining.length === 0) { deleteCard(cardId); return; }
-  c.content = serializeTasksToText(remaining);
-  saveCards();
-  renderBoard();
-  showToast('Cleared completed items');
-}
-
-function convertCardToChecklist(cardId) {
-  const c = cards.find(item => item.id === cardId);
-  if (!c) return;
-  const lines = c.content.split('\n').map(l => l.trim()).filter(Boolean);
-  c.content = lines.map(l => `- [ ] ${l.replace(/^([-*•]|\d+\.)\s+/, '')}`).join('\n');
-  saveCards();
-  renderBoard();
-  showToast('Converted to checklist');
-}
-
-function transformCardContent(id, mode) {
-  const c = cards.find(item => item.id === id);
-  if (!c) return;
-  const meta = classifyContent(c.content);
-  if (mode === 'json-pretty' && meta.parsed) c.content = JSON.stringify(meta.parsed, null, 2);
-  else if (mode === 'json-minify' && meta.parsed) c.content = JSON.stringify(meta.parsed);
-  saveCards();
-  renderBoard();
-}
-
-function copyTableAsMarkdown(id) {
-  const c = cards.find(item => item.id === id);
-  if (!c) return;
-  const meta = classifyContent(c.content);
-  const delim = meta.delimiter || ',';
-  const rows = c.content.trim().split('\n').map(r => r.split(delim).map(cell => cell.trim()));
-  if (!rows.length) return;
-  const header = `| ${rows[0].join(' | ')} |`;
-  const divider = `| ${rows[0].map(() => '---').join(' | ')} |`;
-  const body = rows.slice(1).map(r => `| ${r.join(' | ')} |`).join('\n');
-  copyText([header, divider, body].join('\n'), 'Copied Markdown Table');
-}
-
-function requestSweepUnpinned() {
-  const unpinnedCount = cards.filter(c => !c.pinned).length;
-  if (unpinnedCount === 0) {
-    showToast('No unpinned notes to clear');
-    return;
-  }
-  openConfirmModal({
-    title: 'Sweep Unpinned Notes',
-    body: `Remove ${unpinnedCount} unpinned note entry${unpinnedCount === 1 ? '' : 'ies'} from your workspace? Pinned notes will remain preserved.`,
-    actionLabel: 'Sweep Notes',
-    onConfirm: sweepUnpinned
-  });
-}
-
-function sweepUnpinned() {
-  cards = cards.filter(c => c.pinned);
-  saveCards();
-  renderBoard();
-  showToast('Cleared unpinned notes');
-}
-
-function openConfirmModal(opts) {
-  const modal = document.getElementById('confirmModal');
-  const title = document.getElementById('confirmDialogTitle');
-  const body = document.getElementById('confirmDialogBody');
-  const actionBtn = document.getElementById('confirmActionBtn');
-
-  title.textContent = opts.title || 'Confirm Action';
-  body.textContent = opts.body || '';
-  actionBtn.textContent = opts.actionLabel || 'Confirm';
-  pendingConfirmAction = opts.onConfirm || null;
-
-  modal.classList.add('open');
-  actionBtn.focus();
-}
-
-function closeConfirmModal() {
-  document.getElementById('confirmModal').classList.remove('open');
-  pendingConfirmAction = null;
-}
-
-function confirmModalProceed() {
-  const fn = pendingConfirmAction;
-  closeConfirmModal();
-  if (typeof fn === 'function') fn();
-}
-
-function togglePrivacyMode() {
-  globalPrivacyMode = !globalPrivacyMode;
-  const btn = document.getElementById('privacyToggleBtn');
-  if (btn) btn.classList.toggle('active', globalPrivacyMode);
-  const label = document.getElementById('privacyLabel');
-  if (label) {
-    label.innerHTML = `
-      <span class="btn-text-full">${globalPrivacyMode ? 'Privacy: On' : 'Privacy: Off'}</span>
-      <span class="btn-text-short">${globalPrivacyMode ? 'Masked' : 'Public'}</span>
-    `;
-  }
-  renderBoard();
-  showToast(globalPrivacyMode ? 'Privacy Masking Active' : 'Privacy Masking Inactive');
-}
-
+// ============================================================================
+// Filter Stream
+// ============================================================================
 function setFilter(filter) {
   currentFilter = filter;
-  renderBoard();
-}
-
-function selectSplitCard(id) {
-  selectedSplitCardId = id;
-  renderBoard();
-}
-
-function formatRelativeTime(ts) {
-  const diffSec = Math.max(1, Math.floor((Date.now() - ts) / 1000));
-  if (diffSec < 60) return 'Just now';
-  const mins = Math.floor(diffSec / 60);
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  return `${Math.floor(hrs / 24)}d ago`;
-}
-
-function escapeHtml(str) {
-  return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-}
-
-function maskSecretString(str) {
-  return str.replace(/([:=]\s*|sk-[a-zA-Z0-9_-]{4}|ghp_[a-zA-Z0-9]{4}|rnd_[a-zA-Z0-9]{4})([^\s]+)/g, (m, prefix, rest) => {
-    return prefix + '•'.repeat(Math.min(16, rest.length));
+  const pills = document.querySelectorAll('.filter-pill');
+  pills.forEach(pill => {
+    const f = pill.getAttribute('data-filter');
+    if (f === filter) {
+      pill.className = 'filter-pill flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-brand-600 text-white shadow-sm shrink-0';
+    } else {
+      pill.className = 'filter-pill flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-white dark:bg-dark-card hover:bg-slate-50 dark:hover:bg-dark-cardHover border border-surface-border dark:border-dark-border text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 transition-colors shadow-xs shrink-0';
+    }
   });
+
+  renderBoard();
 }
 
 function updateCounters() {
@@ -691,403 +474,1011 @@ function updateCounters() {
   };
 
   cards.forEach(c => {
-    const meta = classifyContent(c.content);
-    if (counts[meta.type] !== undefined) counts[meta.type]++;
+    const meta = classifyContent(c.content, c.title);
+    if (counts[meta.type] !== undefined) {
+      counts[meta.type]++;
+    } else {
+      counts.NOTE++;
+    }
   });
 
-  const setElText = (id, val) => {
-    const el = document.getElementById(id);
-    if (el) el.textContent = val;
+  const map = {
+    countAll: counts.ALL,
+    countPinned: counts.PINNED,
+    countTasks: counts.TASKS,
+    countUrl: counts.URL,
+    countJson: counts.JSON,
+    countSecret: counts.SECRET,
+    countTable: counts.TABLE,
+    countNote: counts.NOTE
   };
 
-  setElText('countAll', counts.ALL);
-  setElText('countPinned', counts.PINNED);
-  setElText('countTasks', counts.TASKS);
-  setElText('countUrl', counts.URL);
-  setElText('countJson', counts.JSON);
-  setElText('countSecret', counts.SECRET);
-  setElText('countTable', counts.TABLE);
-  setElText('countNote', counts.NOTE);
+  Object.entries(map).forEach(([id, val]) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = val;
+  });
 }
 
-function renderDrawerBody(card, meta) {
-  const blurClass = globalPrivacyMode ? 'privacy-blur' : '';
+// ============================================================================
+// Composer Actions (+ Checklist, Clean URLs, Format JSON, Case, Math/Calc)
+// ============================================================================
+function composerInsertCheckbox() {
+  const ta = document.getElementById('noteBodyInput');
+  if (!ta) return;
+  const start = ta.selectionStart;
+  const end = ta.selectionEnd;
+  const text = ta.value;
 
-  // Inline Note Editor
-  if (editingNoteId === card.id) {
-    return `
-      <div style="display:flex;flex-direction:column;gap:10px">
-        <input
-          id="editTitle-${card.id}"
-          type="text"
-          class="title-input"
-          value="${escapeHtml(card.title)}"
-          placeholder="Note title"
-          style="width:100%"
-        />
-        <textarea
-          id="editArea-${card.id}"
-          class="composer-textarea"
-          rows="6"
-          style="min-height:120px"
-        >${escapeHtml(card.content)}</textarea>
-        <div style="display:flex;justify-content:flex-end;gap:8px">
-          <button class="btn btn-secondary btn-sm" onclick="cancelNoteEdit('${card.id}')">Cancel</button>
-          <button class="btn btn-primary btn-sm" onclick="saveNoteEdit('${card.id}')">Save Changes</button>
-        </div>
-      </div>
-    `;
+  if (start !== end) {
+    const selected = text.substring(start, end);
+    const converted = selected.split('\n').map(l => l.startsWith('- [ ] ') ? l : `- [ ] ${l}`).join('\n');
+    ta.value = text.substring(0, start) + converted + text.substring(end);
+  } else {
+    const prefix = (start > 0 && text[start - 1] !== '\n') ? '\n- [ ] ' : '- [ ] ';
+    ta.value = text.substring(0, start) + prefix + text.substring(end);
+    ta.selectionStart = ta.selectionEnd = start + prefix.length;
+  }
+  ta.focus();
+  updateComposerStats();
+  triggerToast('Inserted checklist task');
+}
+
+function composerCleanUrls() {
+  const ta = document.getElementById('noteBodyInput');
+  if (!ta) return;
+  const text = ta.value;
+  const urls = extractUrlsFromText(text);
+
+  if (urls.length === 0) {
+    triggerToast('No URLs detected in note');
+    return;
   }
 
-  if (meta.type === 'TASKS') {
-    const tasks = parseTasksFromText(card.content);
-    const doneCount = tasks.filter(t => t.done).length;
+  let updated = text;
+  let totalStripped = 0;
+  urls.forEach(u => {
+    if (u.removedCount > 0) {
+      updated = updated.replace(u.original, u.clean);
+      totalStripped += u.removedCount;
+    }
+  });
+
+  ta.value = updated;
+  updateComposerStats();
+  logEvent('Clean URLs', `Removed ${totalStripped} tracking params from ${urls.length} link(s)`);
+  triggerToast(`Cleaned ${urls.length} URL(s) (${totalStripped} params removed)`);
+}
+
+function composerFormatJson() {
+  const ta = document.getElementById('noteBodyInput');
+  if (!ta) return;
+  const text = ta.value.trim();
+  if (!text) {
+    triggerToast('Note body is empty');
+    return;
+  }
+
+  try {
+    const parsed = JSON.parse(text);
+    ta.value = JSON.stringify(parsed, null, 2);
+    updateComposerStats();
+    logEvent('Format JSON', 'Prettified JSON structure');
+    triggerToast('JSON formatted successfully');
+  } catch (err) {
+    triggerToast(`Invalid JSON: ${err.message.slice(0, 32)}`);
+  }
+}
+
+function composerCycleCase() {
+  const ta = document.getElementById('noteBodyInput');
+  if (!ta) return;
+  const text = ta.value;
+  if (!text.trim()) return;
+
+  const modes = ['lower', 'UPPER', 'Title', 'camel'];
+  const mode = modes[caseCycleIndex % modes.length];
+  caseCycleIndex++;
+
+  let result = text;
+  if (mode === 'lower') {
+    result = text.toLowerCase();
+  } else if (mode === 'UPPER') {
+    result = text.toUpperCase();
+  } else if (mode === 'Title') {
+    result = text.replace(/\b\w+/g, w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
+  } else if (mode === 'camel') {
+    result = text.replace(/([-_ ][a-z])/gi, ($1) => $1.toUpperCase().replace(/[-_ ]/, ''));
+  }
+
+  ta.value = result;
+  updateComposerStats();
+  triggerToast(`Case converted: ${mode}`);
+}
+
+function composerEvaluateMath() {
+  const ta = document.getElementById('noteBodyInput');
+  if (!ta) return;
+  const text = ta.value.trim();
+  if (!text) return;
+
+  const mathRes = evaluateMathExpression(text);
+  if (mathRes !== null) {
+    ta.value = `${text} = ${mathRes}`;
+    updateComposerStats();
+    logEvent('Math Calc', `Calculated: ${mathRes}`);
+    triggerToast(`Evaluated: ${mathRes}`);
+    return;
+  }
+
+  // Scan multiple lines for math
+  const lines = text.split('\n');
+  let solved = 0;
+  const newLines = lines.map(line => {
+    const m = evaluateMathExpression(line);
+    if (m !== null && !line.includes('=')) {
+      solved++;
+      return `${line} = ${m}`;
+    }
+    return line;
+  });
+
+  if (solved > 0) {
+    ta.value = newLines.join('\n');
+    updateComposerStats();
+    triggerToast(`Calculated ${solved} expression(s)`);
+  } else {
+    triggerToast('No valid math expression found');
+  }
+}
+
+function updateComposerStats() {
+  const ta = document.getElementById('noteBodyInput');
+  const titleInput = document.getElementById('noteTitleInput');
+  const wordsEl = document.getElementById('wordCountLabel');
+  const charsEl = document.getElementById('charCountLabel');
+  const autoDetect = document.getElementById('autoDetectBadge');
+
+  if (!ta) return;
+  const text = ta.value;
+  const words = text.trim() ? text.trim().split(/\s+/).length : 0;
+  const chars = text.length;
+
+  if (wordsEl) wordsEl.textContent = `${words} word${words === 1 ? '' : 's'}`;
+  if (charsEl) charsEl.textContent = `${chars} chars`;
+
+  if (autoDetect) {
+    const meta = classifyContent(text, titleInput ? titleInput.value : '');
+    autoDetect.textContent = words > 0 ? `${meta.type} • ${meta.subType}` : 'Auto-detect mode';
+  }
+}
+
+function toggleComposerCollapse() {
+  const body = document.getElementById('composerBodyContainer');
+  const icon = document.getElementById('collapseComposerIcon');
+  if (!body || !icon) return;
+
+  isComposerCollapsed = !isComposerCollapsed;
+  if (isComposerCollapsed) {
+    body.classList.add('hidden');
+    icon.textContent = 'expand_more';
+  } else {
+    body.classList.remove('hidden');
+    icon.textContent = 'expand_less';
+  }
+}
+
+// ============================================================================
+// Add / Save Note
+// ============================================================================
+function addScratchCard() {
+  const titleInput = document.getElementById('noteTitleInput');
+  const bodyInput = document.getElementById('noteBodyInput');
+  const pinInput = document.getElementById('pinNoteCheckbox');
+
+  const title = (titleInput ? titleInput.value : '').trim();
+  const content = (bodyInput ? bodyInput.value : '').trim();
+  const pinned = pinInput ? pinInput.checked : false;
+
+  if (!title && !content) {
+    triggerToast('Please enter a note title or content');
+    if (titleInput) titleInput.focus();
+    return;
+  }
+
+  // If in edit mode, update existing card
+  if (editingNoteId) {
+    const target = cards.find(c => c.id === editingNoteId);
+    if (target) {
+      target.title = title || 'Untitled Note';
+      target.content = content;
+      target.pinned = pinned;
+      target.updatedAt = Date.now();
+      saveCardsToStorage();
+      logEvent('Note Updated', `Updated "${target.title}"`);
+      triggerToast('Note updated successfully');
+      editingNoteId = null;
+      document.getElementById('saveNoteBtnText').textContent = 'Save Note';
+    }
+  } else {
+    // New card
+    const newCard = {
+      id: 'card-' + Date.now(),
+      title: title || (content ? content.slice(0, 32) : 'Untitled Note'),
+      content: content,
+      pinned: pinned,
+      createdAt: Date.now()
+    };
+
+    if (pinned) {
+      cards.unshift(newCard);
+    } else {
+      const firstUnpinnedIndex = cards.findIndex(c => !c.pinned);
+      if (firstUnpinnedIndex === -1) {
+        cards.push(newCard);
+      } else {
+        cards.splice(firstUnpinnedIndex, 0, newCard);
+      }
+    }
+
+    selectedSplitCardId = newCard.id;
+    saveCardsToStorage();
+    logEvent('Note Saved', `Created "${newCard.title}"`);
+    triggerToast('Note saved successfully');
+  }
+
+  // Reset inputs
+  if (titleInput) titleInput.value = '';
+  if (bodyInput) bodyInput.value = '';
+  if (pinInput) pinInput.checked = false;
+  updateComposerStats();
+
+  renderBoard();
+  updateCounters();
+}
+
+// ============================================================================
+// Card Operations (Pin, Copy, Delete, Run, Convert, Edit)
+// ============================================================================
+function togglePinCard(id, event) {
+  if (event) event.stopPropagation();
+  const card = cards.find(c => c.id === id);
+  if (!card) return;
+  card.pinned = !card.pinned;
+
+  // Re-sort: pinned first
+  cards.sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
+  saveCardsToStorage();
+  updateCounters();
+  renderBoard();
+  logEvent('Pin Toggled', `Note "${card.title}" ${card.pinned ? 'pinned' : 'unpinned'}`);
+  triggerToast(card.pinned ? 'Note pinned to top' : 'Note unpinned');
+}
+
+function copyCardContent(id, event) {
+  if (event) event.stopPropagation();
+  const card = cards.find(c => c.id === id);
+  if (!card) return;
+
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(card.content).then(() => {
+      logEvent('Content Copied', `Copied "${card.title}"`);
+      triggerToast('Payload copied to clipboard');
+    }).catch(() => fallbackCopy(card.content));
+  } else {
+    fallbackCopy(card.content);
+  }
+}
+
+function fallbackCopy(text) {
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  document.body.appendChild(ta);
+  ta.select();
+  document.execCommand('copy');
+  document.body.removeChild(ta);
+  triggerToast('Payload copied to clipboard');
+}
+
+function deleteCard(id, event) {
+  if (event) event.stopPropagation();
+  const idx = cards.findIndex(c => c.id === id);
+  if (idx === -1) return;
+  const deleted = cards.splice(idx, 1)[0];
+  saveCardsToStorage();
+
+  if (selectedSplitCardId === id) {
+    selectedSplitCardId = cards.length > 0 ? cards[0].id : null;
+  }
+
+  updateCounters();
+  renderBoard();
+  logEvent('Note Deleted', `Deleted "${deleted.title}"`);
+  triggerToast('Note deleted');
+}
+
+function editCardInComposer(id, event) {
+  if (event) event.stopPropagation();
+  const card = cards.find(c => c.id === id);
+  if (!card) return;
+
+  const titleInput = document.getElementById('noteTitleInput');
+  const bodyInput = document.getElementById('noteBodyInput');
+  const pinInput = document.getElementById('pinNoteCheckbox');
+  const saveBtnText = document.getElementById('saveNoteBtnText');
+
+  if (titleInput) titleInput.value = card.title;
+  if (bodyInput) bodyInput.value = card.content;
+  if (pinInput) pinInput.checked = card.pinned;
+  if (saveBtnText) saveBtnText.textContent = 'Update Note';
+
+  editingNoteId = card.id;
+
+  if (isComposerCollapsed) {
+    toggleComposerCollapse();
+  }
+
+  if (titleInput) {
+    titleInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setTimeout(() => titleInput.focus(), 250);
+  }
+  triggerToast('Note loaded into editor');
+}
+
+function convertCardToTasks(id, event) {
+  if (event) event.stopPropagation();
+  const card = cards.find(c => c.id === id);
+  if (!card) return;
+
+  const lines = card.content.split('\n');
+  const taskLines = lines.map(line => {
+    const trimmed = line.trim();
+    if (!trimmed) return line;
+    if (/^[-*•]?\s*\[[ xX]\]/i.test(trimmed)) return line;
+    return `- [ ] ${trimmed}`;
+  });
+
+  card.content = taskLines.join('\n');
+  saveCardsToStorage();
+  updateCounters();
+  renderBoard();
+  logEvent('Converted to Checklist', `Card "${card.title}"`);
+  triggerToast('Converted to interactive checklist');
+}
+
+function runCodeSnippet(id, event) {
+  if (event) event.stopPropagation();
+  const card = cards.find(c => c.id === id);
+  if (!card) return;
+
+  try {
+    const result = Function(`"use strict"; ${card.content}`)();
+    logEvent('Executed Snippet', `Run: ${card.title} -> ${result}`);
+    triggerToast(`Snippet executed: ${result !== undefined ? String(result) : 'Success'}`);
+  } catch (err) {
+    triggerToast(`Execution error: ${err.message}`);
+  }
+}
+
+function selectSplitCard(id) {
+  selectedSplitCardId = id;
+  renderBoard();
+}
+
+// ============================================================================
+// Render Board (Split, Rows, Grid)
+// ============================================================================
+function renderBoard() {
+  const container = document.getElementById('workspaceContentArea');
+  if (!container) return;
+
+  // Filter cards
+  let visibleCards = [...cards];
+
+  if (currentFilter === 'PINNED') {
+    visibleCards = visibleCards.filter(c => c.pinned);
+  } else if (currentFilter !== 'ALL') {
+    visibleCards = visibleCards.filter(c => {
+      const meta = classifyContent(c.content, c.title);
+      return meta.type === currentFilter;
+    });
+  }
+
+  if (searchQuery.trim()) {
+    const q = searchQuery.toLowerCase();
+    visibleCards = visibleCards.filter(c => {
+      return (c.title || '').toLowerCase().includes(q) || (c.content || '').toLowerCase().includes(q);
+    });
+  }
+
+  // Ensure a card is selected for Split View
+  if (visibleCards.length > 0 && !visibleCards.some(c => c.id === selectedSplitCardId)) {
+    selectedSplitCardId = visibleCards[0].id;
+  }
+
+  if (visibleCards.length === 0) {
+    container.innerHTML = `
+      <div class="w-full py-16 flex flex-col items-center justify-center text-center p-6 rounded-2xl bg-white dark:bg-dark-card border border-dashed border-surface-border dark:border-dark-border">
+        <span class="material-symbols-outlined text-4xl text-slate-400 dark:text-slate-600 mb-3">folder_open</span>
+        <h4 class="text-base font-semibold text-slate-800 dark:text-slate-200 font-mono">No matching notes</h4>
+        <p class="text-xs text-slate-500 max-w-sm mt-1">Try clearing your search query or creating a new entry above.</p>
+        <button onclick="clearSearch()" class="mt-4 px-4 py-2 rounded-xl text-xs font-medium text-brand-600 dark:text-brand-400 bg-brand-50 dark:bg-brand-500/10 border border-brand-200 dark:border-brand-500/20">Clear Search Filter</button>
+      </div>
+    `;
+    lucide.createIcons();
+    return;
+  }
+
+  if (currentLayout === 'split') {
+    renderSplitLayout(container, visibleCards);
+  } else if (currentLayout === 'rows') {
+    renderRowsLayout(container, visibleCards);
+  } else {
+    renderGridLayout(container, visibleCards);
+  }
+
+  lucide.createIcons();
+}
+
+// ----------------------------------------------------------------------------
+// 1. Split Layout (4 cols list + 8 cols inspector)
+// ----------------------------------------------------------------------------
+function renderSplitLayout(container, visibleCards) {
+  const selectedCard = cards.find(c => c.id === selectedSplitCardId) || visibleCards[0];
+  const selectedMeta = selectedCard ? classifyContent(selectedCard.content, selectedCard.title) : null;
+
+  let leftCardsHtml = visibleCards.map(c => {
+    const isSelected = c.id === selectedCard.id;
+    const meta = classifyContent(c.content, c.title);
+    const byteSize = new Blob([c.content]).size;
+    const timeAgo = formatRelativeTime(c.createdAt);
+    const contentPreview = escapeHtml(c.content.trim().split('\n')[0] || c.title);
+
+    const borderClasses = isSelected
+      ? 'border-2 border-brand-500/80 shadow-sm dark:shadow-glow-sm'
+      : 'border border-surface-border dark:border-dark-border hover:border-slate-300 dark:hover:border-slate-700';
+
     return `
-      <div class="checklist-container ${blurClass}">
-        <div class="checklist-header">
-          <span>PROGRESS: ${doneCount} of ${tasks.length} tasks completed</span>
-          <div style="display:flex;gap:6px">
-            <button class="btn btn-tertiary btn-sm" onclick="startEditingNote('${card.id}')">Edit Raw</button>
-            <button class="btn btn-tertiary btn-sm" onclick="clearCompletedTasks('${card.id}')">Clear Completed</button>
+      <article
+        onclick="selectSplitCard('${c.id}')"
+        class="group relative rounded-xl bg-white dark:bg-dark-card ${borderClasses} p-4 cursor-pointer transition-all hover:bg-slate-50 dark:hover:bg-dark-cardHover"
+      >
+        <div class="flex items-center justify-between gap-2 mb-2">
+          <div class="flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full ${c.pinned ? 'bg-amber-400' : 'bg-emerald-500 animate-pulse'}"></span>
+            <span class="text-[10px] font-mono uppercase tracking-wider font-semibold px-2 py-0.5 rounded bg-brand-50 dark:bg-brand-500/10 text-brand-700 dark:text-brand-400 border border-brand-200 dark:border-brand-500/20">${meta.type}</span>
           </div>
+          <span class="text-[11px] font-mono text-slate-400 dark:text-slate-500">${timeAgo}</span>
         </div>
-        <div class="checklist-items">
-          ${tasks.map((t, idx) => `
-            <div class="checklist-row">
-              <label class="checklist-label">
-                <input type="checkbox" ${t.done ? 'checked' : ''} onchange="toggleTaskItem('${card.id}', ${idx})" />
-                <span class="${t.done ? 'done' : ''}">${escapeHtml(t.text)}</span>
-              </label>
-              <button class="btn btn-tertiary btn-sm" onclick="deleteTaskItem('${card.id}', ${idx})" title="Remove item">×</button>
-            </div>
-          `).join('')}
-        </div>
-        <div class="checklist-add-bar">
-          <input
-            type="text"
-            class="checklist-input"
-            placeholder="Add checklist task..."
-            onkeydown="if(event.key==='Enter'){event.preventDefault();addInlineTaskItem('${card.id}', this);}"
-          />
-          <button class="btn btn-secondary btn-sm" onclick="addInlineTaskItem('${card.id}', this.previousElementSibling)">Add Task</button>
-        </div>
-      </div>
-    `;
-  }
-
-  if (meta.type === 'URL' && meta.urls) {
-    return `
-      <div class="url-group ${blurClass}">
-        ${meta.urls.map(info => `
-          <div class="url-card">
-            <div class="url-card-top">
-              <div style="display:flex;align-items:center;gap:8px">
-                <span class="url-host-badge">${escapeHtml(info.hostname)}</span>
-                ${info.removedCount > 0 ? `<span class="url-clean-badge">${info.removedCount} Tracking Tags Removed</span>` : ''}
-              </div>
-              <div style="display:flex;gap:6px">
-                <button class="btn btn-secondary btn-sm" onclick="copyText('${escapeHtml(info.clean)}', 'Copied Clean URL')">Copy Link</button>
-                <a href="${escapeHtml(info.clean)}" target="_blank" rel="noopener" class="btn btn-primary btn-sm">Open ↗</a>
-              </div>
-            </div>
-            <div class="url-href-text">${escapeHtml(info.clean)}</div>
-          </div>
-        `).join('')}
-        <div style="display:flex;justify-content:flex-end;margin-top:4px">
-          <button class="btn btn-tertiary btn-sm" onclick="startEditingNote('${card.id}')">Edit Links</button>
-        </div>
-      </div>
-    `;
-  }
-
-  if (meta.type === 'SECRET') {
-    const displayValue = (card.revealed && !globalPrivacyMode) ? card.content : maskSecretString(card.content);
-    return `
-      <div style="display:flex;flex-direction:column;gap:8px">
-        <pre class="content-snippet ${globalPrivacyMode ? 'privacy-blur' : ''}">${escapeHtml(displayValue)}</pre>
-        <div style="display:flex;justify-content:space-between;align-items:center">
-          <span style="font-size:11px;color:var(--text-secondary);font-family:var(--font-mono)">ENVIRONMENT SECRET ISOLATION</span>
-          <div style="display:flex;gap:6px">
-            <button class="btn btn-tertiary btn-sm" onclick="startEditingNote('${card.id}')">Edit Keys</button>
-            <button class="btn btn-secondary btn-sm" onclick="toggleRevealSecret('${card.id}')">
-              ${card.revealed ? 'Hide Secret' : 'Reveal Secret'}
+        <h3 class="text-sm font-semibold text-slate-900 dark:text-white font-mono truncate mb-1">
+          ${escapeHtml(c.title)}
+        </h3>
+        <p class="text-xs text-slate-500 dark:text-slate-400 font-mono truncate">
+          ${contentPreview}
+        </p>
+        <div class="mt-3 pt-2.5 border-t border-surface-border dark:border-dark-border flex items-center justify-between text-xs text-slate-400 dark:text-slate-500">
+          <span class="text-[11px] font-mono text-slate-500">${byteSize} bytes • ${meta.subType}</span>
+          <div class="flex items-center gap-1">
+            <button onclick="togglePinCard('${c.id}', event)" class="p-1 hover:text-brand-600 dark:hover:text-brand-400 rounded transition-colors" title="${c.pinned ? 'Unpin' : 'Pin'}">
+              <i class="w-3.5 h-3.5 ${c.pinned ? 'text-amber-500' : ''}" data-lucide="pin"></i>
+            </button>
+            <button onclick="copyCardContent('${c.id}', event)" class="p-1 hover:text-emerald-600 dark:hover:text-emerald-400 rounded transition-colors" title="Quick copy">
+              <i class="w-3.5 h-3.5" data-lucide="copy"></i>
             </button>
           </div>
         </div>
+      </article>
+    `;
+  }).join('');
+
+  // Inspector Right Column
+  let inspectorHtml = '';
+  if (selectedCard && selectedMeta) {
+    const rawContent = globalPrivacyMode ? maskSecretString(selectedCard.content) : selectedCard.content;
+    const syntaxLines = highlightSyntax(rawContent, selectedMeta.language);
+    const lineCount = rawContent.split('\n').length;
+    const byteSize = new Blob([rawContent]).size;
+
+    const lineNumsHtml = syntaxLines.map((_, i) => `<div>${i + 1}</div>`).join('');
+    const codeContentHtml = syntaxLines.map(l => `<div>${l || '&nbsp;'}</div>`).join('');
+
+    inspectorHtml = `
+      <div class="lg:col-span-8 rounded-2xl bg-white dark:bg-dark-card border border-surface-border dark:border-dark-border overflow-hidden shadow-sm dark:shadow-2xl" data-purpose="note-editor-inspector">
+        <!-- Note Header & Toolbar -->
+        <div class="px-5 sm:px-6 py-4 border-b border-surface-border dark:border-dark-border flex flex-wrap items-center justify-between gap-3 sm:gap-4 bg-surface-subtle/50 dark:bg-dark-surface/60">
+          <div class="flex items-center gap-3 min-w-0">
+            <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-glow-emerald shrink-0"></span>
+            <span class="text-[10px] font-mono font-bold tracking-wider px-2 py-0.5 rounded bg-brand-50 dark:bg-brand-500/10 text-brand-700 dark:text-brand-400 border border-brand-200 dark:border-brand-500/20 shrink-0">${selectedMeta.type}</span>
+            <h2 class="text-base font-semibold text-slate-900 dark:text-white font-mono tracking-tight truncate">
+              ${escapeHtml(selectedCard.title)}
+            </h2>
+          </div>
+          <div class="flex items-center gap-2 shrink-0">
+            <button onclick="togglePinCard('${selectedCard.id}')" class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white bg-white dark:bg-dark-surface hover:bg-slate-50 dark:hover:bg-dark-border border border-surface-border dark:border-dark-border rounded-lg transition-colors shadow-xs">
+              <i class="w-3.5 h-3.5 ${selectedCard.pinned ? 'text-amber-500' : 'text-slate-500 dark:text-slate-400'}" data-lucide="pin"></i>
+              <span>${selectedCard.pinned ? 'Pinned' : 'Pin'}</span>
+            </button>
+            <button onclick="copyCardContent('${selectedCard.id}')" class="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold text-slate-800 dark:text-white bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded-lg transition-all active:scale-95 shadow-xs">
+              <i class="w-3.5 h-3.5 text-brand-600 dark:text-brand-400" data-lucide="copy"></i>
+              <span>Copy</span>
+            </button>
+            <button onclick="deleteCard('${selectedCard.id}')" class="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-rose-600 dark:text-rose-400 hover:text-rose-700 dark:hover:text-rose-300 bg-rose-50 dark:bg-rose-950/20 hover:bg-rose-100/70 dark:hover:bg-rose-950/40 border border-rose-200 dark:border-rose-900/30 rounded-lg transition-colors">
+              <i class="w-3.5 h-3.5" data-lucide="trash-2"></i>
+              <span>Delete</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Editor Code Canvas Area -->
+        <div class="p-4 sm:p-6">
+          <div class="relative rounded-xl bg-slate-50 dark:bg-dark-surface/90 border border-surface-border dark:border-dark-border font-mono text-sm overflow-hidden">
+            <!-- Code Canvas Top Bar -->
+            <div class="px-4 py-2 bg-slate-100/80 dark:bg-dark-base/70 border-b border-surface-border dark:border-dark-border flex items-center justify-between text-xs text-slate-500">
+              <div class="flex items-center gap-2">
+                <span class="w-2.5 h-2.5 rounded-full bg-rose-400 dark:bg-red-500/70 inline-block"></span>
+                <span class="w-2.5 h-2.5 rounded-full bg-amber-400 dark:bg-yellow-500/70 inline-block"></span>
+                <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 dark:bg-green-500/70 inline-block"></span>
+                <span class="ml-2 font-mono text-[11px] font-medium text-slate-600 dark:text-slate-400">${selectedMeta.filename}</span>
+              </div>
+              <span class="text-[11px] font-mono text-slate-400 dark:text-slate-500">UTF-8 • CRLF</span>
+            </div>
+
+            <!-- Code Body with Line Numbers -->
+            <div class="p-4 flex gap-4 min-h-[160px] text-slate-800 dark:text-slate-200 overflow-x-auto leading-relaxed">
+              <div class="line-num font-mono text-xs space-y-1 select-none">
+                ${lineNumsHtml}
+              </div>
+              <div class="flex-1 font-mono text-xs md:text-sm space-y-1">
+                ${codeContentHtml}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Note Detail Footer: Edit & Convert Actions -->
+        <div class="px-5 sm:px-6 py-3.5 bg-surface-subtle/50 dark:bg-dark-surface/40 border-t border-surface-border dark:border-dark-border flex flex-wrap items-center justify-between gap-3 text-xs">
+          <div class="flex items-center gap-3 sm:gap-4 text-slate-500 font-mono text-[11px]">
+            <span>Payload: <strong class="text-slate-800 dark:text-slate-300">${byteSize} Bytes</strong></span>
+            <span>Lines: <strong class="text-slate-800 dark:text-slate-300">${lineCount}</strong></span>
+            <span>Encoding: <strong class="text-slate-800 dark:text-slate-300">ASCII</strong></span>
+          </div>
+          <div class="flex items-center gap-2">
+            <button onclick="editCardInComposer('${selectedCard.id}')" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white bg-white dark:bg-dark-card hover:bg-slate-50 dark:hover:bg-dark-cardHover border border-surface-border dark:border-dark-border transition-colors font-medium shadow-xs">
+              <i class="w-3.5 h-3.5 text-brand-600 dark:text-brand-400" data-lucide="edit-3"></i>
+              <span>Edit Note</span>
+            </button>
+            <button onclick="convertCardToTasks('${selectedCard.id}')" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white bg-white dark:bg-dark-card hover:bg-slate-50 dark:hover:bg-dark-cardHover border border-surface-border dark:border-dark-border transition-colors font-medium shadow-xs">
+              <i class="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" data-lucide="check-square"></i>
+              <span>To Checklist</span>
+            </button>
+            ${selectedMeta.type === 'CODE' ? `
+            <button onclick="runCodeSnippet('${selectedCard.id}')" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-brand-700 dark:text-brand-300 hover:text-brand-900 bg-brand-50 dark:bg-brand-950/40 border border-brand-200 dark:border-brand-500/40 transition-colors font-medium shadow-xs">
+              <i class="w-3.5 h-3.5" data-lucide="play"></i>
+              <span>Run</span>
+            </button>
+            ` : ''}
+          </div>
+        </div>
       </div>
     `;
   }
 
-  if (meta.type === 'TABLE') {
-    const delim = meta.delimiter || ',';
-    const rows = card.content.trim().split('\n').map(r => r.split(delim).map(c => c.trim()));
-    const headers = rows[0] || [];
-    const bodyRows = rows.slice(1);
-    return `
-      <div style="display:flex;flex-direction:column;gap:10px">
-        <div class="table-wrapper ${blurClass}">
-          <table class="dev-table">
-            <thead><tr>${headers.map(h => `<th>${escapeHtml(h)}</th>`).join('')}</tr></thead>
-            <tbody>
-              ${bodyRows.map(r => `<tr>${r.map(c => `<td>${escapeHtml(c)}</td>`).join('')}</tr>`).join('')}
-            </tbody>
-          </table>
-        </div>
-        <div style="display:flex;justify-content:flex-end;gap:6px">
-          <button class="btn btn-tertiary btn-sm" onclick="startEditingNote('${card.id}')">Edit CSV</button>
-          <button class="btn btn-secondary btn-sm" onclick="copyTableAsMarkdown('${card.id}')">Copy Markdown Table</button>
-        </div>
+  container.innerHTML = `
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start" data-purpose="split-view-workspace">
+      <!-- Left Column: Item List (4 Cols) -->
+      <div class="lg:col-span-4 space-y-3" data-purpose="notes-list-column">
+        ${leftCardsHtml}
+        <!-- New Item Placeholder Button -->
+        <button
+          onclick="focusComposer()"
+          class="w-full py-3.5 rounded-xl border border-dashed border-slate-300 dark:border-dark-border hover:border-brand-500 hover:bg-white dark:hover:bg-dark-card/40 text-slate-500 hover:text-brand-700 dark:hover:text-slate-300 transition-all flex items-center justify-center gap-2 text-xs font-mono font-medium"
+        >
+          <i class="w-4 h-4" data-lucide="plus-circle"></i>
+          <span>Create New Entry</span>
+        </button>
       </div>
-    `;
-  }
 
-  if (meta.type === 'JSON' && meta.parsed) {
-    return `
-      <div style="display:flex;flex-direction:column;gap:8px">
-        <pre class="content-snippet ${blurClass}">${escapeHtml(card.content)}</pre>
-        <div style="display:flex;justify-content:flex-end;gap:6px">
-          <button class="btn btn-tertiary btn-sm" onclick="startEditingNote('${card.id}')">Edit JSON</button>
-          <button class="btn btn-secondary btn-sm" onclick="transformCardContent('${card.id}', 'json-pretty')">Format JSON</button>
-          <button class="btn btn-tertiary btn-sm" onclick="transformCardContent('${card.id}', 'json-minify')">Minify</button>
-        </div>
-      </div>
-    `;
-  }
-
-  return `
-    <div style="display:flex;flex-direction:column;gap:8px">
-      <pre class="content-snippet ${blurClass}">${escapeHtml(card.content)}</pre>
-      <div style="display:flex;justify-content:flex-end;gap:6px">
-        <button class="btn btn-tertiary btn-sm" onclick="startEditingNote('${card.id}')">Edit Note</button>
-        <button class="btn btn-tertiary btn-sm" onclick="convertCardToChecklist('${card.id}')">To Checklist</button>
-      </div>
+      <!-- Right Column: Inspector (8 Cols) -->
+      ${inspectorHtml}
     </div>
   `;
 }
 
-/**
- * Render-Style Developer UI: Full-width horizontal row
- */
-function renderHorizontalRowHtml(card, meta) {
-  const isExpanded = expandedRowIds.has(card.id);
-  const snippet = card.content.replace(/\n+/g, ' ').slice(0, 85);
+// ----------------------------------------------------------------------------
+// 2. Rows Layout (Render-style full-width rows)
+// ----------------------------------------------------------------------------
+function renderRowsLayout(container, visibleCards) {
+  const rowsHtml = visibleCards.map(c => {
+    const meta = classifyContent(c.content, c.title);
+    const byteSize = new Blob([c.content]).size;
+    const timeAgo = formatRelativeTime(c.createdAt);
+    const contentPreview = escapeHtml(c.content.trim().slice(0, 160));
 
-  return `
-    <article class="render-row ${card.pinned ? 'pinned-row' : ''} ${isExpanded ? 'is-expanded' : ''}" id="row-${card.id}">
-      <div class="row-header" onclick="toggleRowExpanded('${card.id}', event)">
-        <div class="row-left">
-          <span class="status-dot ${card.pinned ? 'dot-pinned' : ''}" title="${card.pinned ? 'Pinned Note' : 'Live Note Entry'}"></span>
-          <span class="badge-tag">${meta.badge}</span>
+    return `
+      <article class="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 p-4 rounded-xl bg-white dark:bg-dark-card border border-surface-border dark:border-dark-border hover:border-slate-300 dark:hover:border-slate-700 shadow-xs transition-all">
+        <div class="flex items-start gap-3 min-w-0 flex-1">
+          <span class="w-2 h-2 rounded-full ${c.pinned ? 'bg-amber-400' : 'bg-emerald-500'} mt-1.5 shrink-0"></span>
+          <div class="min-w-0 flex-1">
+            <div class="flex items-center gap-2 mb-1">
+              <span class="text-[10px] font-mono uppercase tracking-wider font-semibold px-2 py-0.2 rounded bg-brand-50 dark:bg-brand-500/10 text-brand-700 dark:text-brand-400 border border-brand-200 dark:border-brand-500/20">${meta.type}</span>
+              <h3 class="text-sm font-semibold text-slate-900 dark:text-white font-mono truncate">${escapeHtml(c.title)}</h3>
+              <span class="text-[11px] font-mono text-slate-400 dark:text-slate-500 ml-auto md:ml-2">${timeAgo}</span>
+            </div>
+            <p class="text-xs font-mono text-slate-500 dark:text-slate-400 truncate">${contentPreview}</p>
+          </div>
         </div>
 
-        <div class="row-mid">
-          <span class="row-title">${escapeHtml(card.title)}</span>
-          <span class="row-preview">${escapeHtml(snippet)}</span>
-        </div>
-
-        <div class="row-right">
-          <span class="row-meta-text">${formatRelativeTime(card.createdAt)}</span>
-          <div class="row-actions">
-            <button class="btn btn-secondary btn-sm ${card.pinned ? 'btn-pinned' : ''}" onclick="togglePin('${card.id}')">
-              ${card.pinned ? 'Pinned' : 'Pin'}
+        <div class="flex items-center gap-3 shrink-0 w-full md:w-auto justify-between md:justify-end border-t md:border-t-0 pt-2 md:pt-0 border-surface-border dark:border-dark-border">
+          <span class="text-[11px] font-mono text-slate-500">${byteSize}B • ${meta.subType}</span>
+          <div class="flex items-center gap-1.5">
+            <button onclick="togglePinCard('${c.id}')" class="p-1.5 rounded-lg text-slate-500 hover:text-brand-600 dark:hover:text-white bg-slate-100 dark:bg-dark-surface" title="Pin note">
+              <i class="w-3.5 h-3.5 ${c.pinned ? 'text-amber-500' : ''}" data-lucide="pin"></i>
             </button>
-            <button class="btn btn-primary btn-sm" onclick="copyCardContent('${card.id}')">
-              Copy
+            <button onclick="copyCardContent('${c.id}')" class="p-1.5 rounded-lg text-slate-500 hover:text-emerald-600 dark:hover:text-white bg-slate-100 dark:bg-dark-surface" title="Copy payload">
+              <i class="w-3.5 h-3.5" data-lucide="copy"></i>
             </button>
-            <button class="btn btn-danger btn-sm" onclick="deleteCard('${card.id}')">
-              Delete
+            <button onclick="editCardInComposer('${c.id}')" class="p-1.5 rounded-lg text-slate-500 hover:text-brand-600 dark:hover:text-white bg-slate-100 dark:bg-dark-surface" title="Edit note">
+              <i class="w-3.5 h-3.5" data-lucide="edit-3"></i>
             </button>
-            <button class="btn btn-tertiary btn-sm" onclick="toggleRowExpanded('${card.id}', event)" title="Toggle details tray">
-              <svg class="expand-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <polyline points="6 9 12 15 18 9"></polyline>
-              </svg>
+            <button onclick="deleteCard('${c.id}')" class="p-1.5 rounded-lg text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40" title="Delete note">
+              <i class="w-3.5 h-3.5" data-lucide="trash-2"></i>
             </button>
           </div>
         </div>
-      </div>
+      </article>
+    `;
+  }).join('');
 
-      <div class="row-drawer">
-        ${renderDrawerBody(card, meta)}
-      </div>
-    </article>
+  container.innerHTML = `
+    <div class="flex flex-col space-y-3">
+      ${rowsHtml}
+      <button
+        onclick="focusComposer()"
+        class="w-full py-3.5 rounded-xl border border-dashed border-slate-300 dark:border-dark-border hover:border-brand-500 hover:bg-white dark:hover:bg-dark-card/40 text-slate-500 hover:text-brand-700 dark:hover:text-slate-300 transition-all flex items-center justify-center gap-2 text-xs font-mono font-medium"
+      >
+        <i class="w-4 h-4" data-lucide="plus-circle"></i>
+        <span>Create New Entry</span>
+      </button>
+    </div>
   `;
 }
 
-function renderBoard() {
-  updateCounters();
+// ----------------------------------------------------------------------------
+// 3. Grid Layout (Responsive 2 / 3 columns)
+// ----------------------------------------------------------------------------
+function renderGridLayout(container, visibleCards) {
+  const gridHtml = visibleCards.map(c => {
+    const meta = classifyContent(c.content, c.title);
+    const byteSize = new Blob([c.content]).size;
+    const timeAgo = formatRelativeTime(c.createdAt);
+    const contentPreview = escapeHtml(c.content.trim().slice(0, 200));
 
-  document.querySelectorAll('.filter-pills .filter-pill').forEach(btn => {
-    btn.classList.toggle('active', btn.getAttribute('data-filter') === currentFilter);
-  });
-  document.querySelectorAll('.layout-toggle-group .layout-toggle-btn').forEach(btn => {
-    btn.classList.toggle('active', btn.getAttribute('data-layout') === currentLayout);
-  });
-
-  const grid = document.getElementById('cardsGrid');
-  grid.className = `layout-${currentLayout}`;
-
-  const filtered = cards
-    .map(c => ({ card: c, meta: classifyContent(c.content) }))
-    .filter(({ card, meta }) => {
-      if (currentFilter === 'PINNED' && !card.pinned) return false;
-      if (currentFilter !== 'ALL' && currentFilter !== 'PINNED' && meta.type !== currentFilter) return false;
-      if (searchQuery) {
-        const q = searchQuery.toLowerCase();
-        return card.title.toLowerCase().includes(q) || card.content.toLowerCase().includes(q) || meta.badge.toLowerCase().includes(q);
-      }
-      return true;
-    })
-    .sort((a, b) => (b.card.pinned ? 1 : 0) - (a.card.pinned ? 1 : 0) || b.card.createdAt - a.card.createdAt);
-
-  if (filtered.length === 0) {
-    grid.className = 'layout-rows';
-    grid.innerHTML = `
-      <div class="render-row" style="text-align: center; padding: 40px;">
-        <p style="font-weight:600;font-size:14px;color:var(--text-primary)">
-          ${searchQuery ? `No note entries match "${escapeHtml(searchQuery)}"` : 'No note entries found in this view'}
-        </p>
-        <p style="font-size:12px;color:var(--text-secondary);margin-top:6px">
-          ${searchQuery ? `<button class="btn btn-secondary btn-sm" onclick="document.getElementById('searchInput').value='';searchQuery='';renderBoard();">Clear search</button>` : 'Create a new note entry above or select "All".'}
-        </p>
-      </div>
-    `;
-    return;
-  }
-
-  // Render-Style Horizontal Rows (Primary View)
-  if (currentLayout === 'rows') {
-    grid.innerHTML = filtered.map(({ card, meta }) => renderHorizontalRowHtml(card, meta)).join('');
-    return;
-  }
-
-  // Card Grid View
-  if (currentLayout === 'grid') {
-    grid.innerHTML = filtered.map(({ card, meta }) => renderHorizontalRowHtml(card, meta)).join('');
-    return;
-  }
-
-  // Split Inspector View
-  if (currentLayout === 'split') {
-    const activeEntry = filtered.find(f => f.card.id === selectedSplitCardId) || filtered[0];
-    selectedSplitCardId = activeEntry.card.id;
-    const { card, meta } = activeEntry;
-
-    grid.innerHTML = `
-      <aside class="split-nav-list">
-        ${filtered.map(item => `
-          <div class="split-nav-item ${item.card.id === selectedSplitCardId ? 'active' : ''}" onclick="selectSplitCard('${item.card.id}')">
-            <div style="display:flex;justify-content:space-between;align-items:center">
-              <span class="badge-tag">${item.meta.badge}</span>
-              <span class="row-meta-text">${item.card.pinned ? 'Pinned • ' : ''}${formatRelativeTime(item.card.createdAt)}</span>
-            </div>
-            <div style="font-weight:600;font-size:13px;color:var(--text-primary);margin-top:4px">${escapeHtml(item.card.title)}</div>
+    return `
+      <article class="flex flex-col rounded-xl bg-white dark:bg-dark-card border border-surface-border dark:border-dark-border hover:border-slate-300 dark:hover:border-slate-700 shadow-xs transition-all overflow-hidden">
+        <div class="p-4 flex items-center justify-between border-b border-surface-border dark:border-dark-border bg-surface-subtle/40 dark:bg-dark-surface/40">
+          <div class="flex items-center gap-2 min-w-0">
+            <span class="w-2 h-2 rounded-full ${c.pinned ? 'bg-amber-400' : 'bg-emerald-500'} shrink-0"></span>
+            <span class="text-[10px] font-mono uppercase tracking-wider font-semibold px-2 py-0.2 rounded bg-brand-50 dark:bg-brand-500/10 text-brand-700 dark:text-brand-400 border border-brand-200 dark:border-brand-500/20">${meta.type}</span>
+            <h3 class="text-sm font-semibold text-slate-900 dark:text-white font-mono truncate">${escapeHtml(c.title)}</h3>
           </div>
-        `).join('')}
-      </aside>
-
-      <div class="render-row is-expanded" style="background-color:var(--bg-surface);min-width:0;overflow:hidden">
-        <div class="row-header" style="border-bottom:1px solid var(--border-default)">
-          <div class="row-left" style="min-width:0;flex:1">
-            <span class="status-dot ${card.pinned ? 'dot-pinned' : ''}"></span>
-            <span class="badge-tag">${meta.badge}</span>
-            <span class="row-title" style="max-width:none;overflow:hidden;text-overflow:ellipsis">${escapeHtml(card.title)}</span>
-          </div>
-          <div class="row-right">
-            <button class="btn btn-secondary btn-sm ${card.pinned ? 'btn-pinned' : ''}" onclick="togglePin('${card.id}')">${card.pinned ? 'Pinned' : 'Pin'}</button>
-            <button class="btn btn-primary btn-sm" onclick="copyCardContent('${card.id}')">Copy</button>
-            <button class="btn btn-danger btn-sm" onclick="deleteCard('${card.id}')">Delete</button>
+          <span class="text-[11px] font-mono text-slate-400 shrink-0 ml-2">${timeAgo}</span>
+        </div>
+        <div class="p-4 flex-1 font-mono text-xs text-slate-600 dark:text-slate-300 whitespace-pre-wrap line-clamp-5">
+          ${contentPreview}
+        </div>
+        <div class="px-4 py-3 border-t border-surface-border dark:border-dark-border flex items-center justify-between text-xs text-slate-400">
+          <span class="text-[11px] font-mono text-slate-500">${byteSize}B • ${meta.subType}</span>
+          <div class="flex items-center gap-1">
+            <button onclick="togglePinCard('${c.id}')" class="p-1 hover:text-brand-600 dark:hover:text-brand-400" title="Pin">
+              <i class="w-3.5 h-3.5 ${c.pinned ? 'text-amber-500' : ''}" data-lucide="pin"></i>
+            </button>
+            <button onclick="copyCardContent('${c.id}')" class="p-1 hover:text-emerald-600 dark:hover:text-emerald-400" title="Copy">
+              <i class="w-3.5 h-3.5" data-lucide="copy"></i>
+            </button>
+            <button onclick="editCardInComposer('${c.id}')" class="p-1 hover:text-brand-600 dark:hover:text-brand-400" title="Edit">
+              <i class="w-3.5 h-3.5" data-lucide="edit-3"></i>
+            </button>
+            <button onclick="deleteCard('${c.id}')" class="p-1 text-rose-500 hover:text-rose-700" title="Delete">
+              <i class="w-3.5 h-3.5" data-lucide="trash-2"></i>
+            </button>
           </div>
         </div>
-        <div class="row-drawer" style="display:flex">
-          ${renderDrawerBody(card, meta)}
-        </div>
-      </div>
+      </article>
     `;
+  }).join('');
+
+  container.innerHTML = `
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      ${gridHtml}
+    </div>
+    <div class="mt-4">
+      <button
+        onclick="focusComposer()"
+        class="w-full py-3.5 rounded-xl border border-dashed border-slate-300 dark:border-dark-border hover:border-brand-500 hover:bg-white dark:hover:bg-dark-card/40 text-slate-500 hover:text-brand-700 dark:hover:text-slate-300 transition-all flex items-center justify-center gap-2 text-xs font-mono font-medium"
+      >
+        <i class="w-4 h-4" data-lucide="plus-circle"></i>
+        <span>Create New Entry</span>
+      </button>
+    </div>
+  `;
+}
+
+function focusComposer() {
+  const titleInput = document.getElementById('noteTitleInput');
+  if (isComposerCollapsed) {
+    toggleComposerCollapse();
   }
+  if (titleInput) {
+    titleInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setTimeout(() => titleInput.focus(), 250);
+  }
+}
+
+function clearSearch() {
+  searchQuery = '';
+  const d = document.getElementById('desktopSearchInput');
+  const m = document.getElementById('mobileSearchInput');
+  if (d) d.value = '';
+  if (m) m.value = '';
+  renderBoard();
+}
+
+// ============================================================================
+// Export Operations
+// ============================================================================
+function toggleExportDropdown() {
+  const menu = document.getElementById('exportDropdownMenu');
+  if (menu) menu.classList.toggle('hidden');
+}
+
+// Close dropdown when clicking outside
+document.addEventListener('click', (e) => {
+  const trigger = document.getElementById('exportDropdownTrigger');
+  const menu = document.getElementById('exportDropdownMenu');
+  if (menu && !menu.classList.contains('hidden') && trigger && !trigger.contains(e.target) && !menu.contains(e.target)) {
+    menu.classList.add('hidden');
+  }
+});
+
+function generateWorkspaceMarkdown() {
+  let md = `# StateFlow Workspace Digest\n`;
+  md += `Exported: ${new Date().toISOString()} • Total Notes: ${cards.length}\n\n`;
+
+  cards.forEach((c, i) => {
+    const meta = classifyContent(c.content, c.title);
+    md += `## ${i + 1}. ${c.title} [${meta.type}]\n`;
+    md += `- Status: ${c.pinned ? 'Pinned' : 'Active'}\n`;
+    md += `- Created: ${new Date(c.createdAt).toLocaleString()}\n\n`;
+    md += `\`\`\`${meta.language || ''}\n${c.content}\n\`\`\`\n\n---\n\n`;
+  });
+  return md;
 }
 
 function openExportModal() {
   const modal = document.getElementById('exportModal');
-  const area = document.getElementById('exportMarkdownArea');
-  const lines = [
-    `# StateFlow Workspace Export`,
-    `Generated: ${new Date().toISOString()}`,
-    `Environment: production-us-east`,
-    `Total Note Entries: ${cards.length}`,
-    '',
-    '---',
-    ''
-  ];
-  cards.forEach(c => {
-    const meta = classifyContent(c.content);
-    lines.push(`## ${c.title} [${meta.badge}]`);
-    lines.push(`*Created: ${new Date(c.createdAt).toLocaleString()} | Pinned: ${c.pinned ? 'Yes' : 'No'}*`);
-    lines.push('');
-    lines.push(c.content);
-    lines.push('');
-    lines.push('---');
-    lines.push('');
-  });
-  area.value = lines.join('\n');
-  modal.classList.add('open');
+  const ta = document.getElementById('exportMarkdownArea');
+  const menu = document.getElementById('exportDropdownMenu');
+  if (menu) menu.classList.add('hidden');
+
+  if (ta) ta.value = generateWorkspaceMarkdown();
+  if (modal) modal.classList.remove('hidden');
+  logEvent('Export Opened', 'Generated workspace markdown');
 }
 
 function closeExportModal() {
-  document.getElementById('exportModal').classList.remove('open');
+  const modal = document.getElementById('exportModal');
+  if (modal) modal.classList.add('hidden');
 }
 
-function copyDigestMarkdown() {
-  const area = document.getElementById('exportMarkdownArea');
-  copyText(area.value, 'Copied Workspace Markdown');
+function copyExportAreaMarkdown() {
+  const ta = document.getElementById('exportMarkdownArea');
+  if (!ta) return;
+  navigator.clipboard.writeText(ta.value).then(() => {
+    triggerToast('Markdown copied to clipboard');
+    closeExportModal();
+  });
+}
+
+function copyAllMarkdownDigest() {
+  const menu = document.getElementById('exportDropdownMenu');
+  if (menu) menu.classList.add('hidden');
+  const md = generateWorkspaceMarkdown();
+  navigator.clipboard.writeText(md).then(() => {
+    triggerToast('All notes copied as Markdown');
+  });
+}
+
+function downloadMarkdownFile() {
+  const menu = document.getElementById('exportDropdownMenu');
+  if (menu) menu.classList.add('hidden');
+  const md = generateWorkspaceMarkdown();
+  const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `StateFlow-Digest-${new Date().toISOString().slice(0, 10)}.md`;
+  a.click();
+  URL.revokeObjectURL(url);
+  triggerToast('Markdown file downloaded');
   closeExportModal();
 }
 
-// Global Keyboard Shortcuts and Event Listeners
-document.addEventListener('DOMContentLoaded', () => {
-  loadState();
-  renderBoard();
+// ============================================================================
+// Clear Unpinned Notes Confirmation
+// ============================================================================
+function requestSweepUnpinned() {
+  const unpinnedCount = cards.filter(c => !c.pinned).length;
+  if (unpinnedCount === 0) {
+    triggerToast('No unpinned notes to clear');
+    return;
+  }
+  const modal = document.getElementById('confirmModal');
+  const body = document.getElementById('confirmModalBody');
+  if (body) {
+    body.textContent = `Remove ${unpinnedCount} unpinned note(s) from your workspace? Pinned notes will be safely kept.`;
+  }
+  if (modal) modal.classList.remove('hidden');
+}
 
-  const scratch = document.getElementById('scratchInput');
-  if (scratch) {
-    scratch.addEventListener('input', updateLiveComposerMeta);
-    scratch.addEventListener('keydown', (e) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
-        e.preventDefault();
-        addScratchCard();
-      }
-    });
+function closeConfirmModal() {
+  const modal = document.getElementById('confirmModal');
+  if (modal) modal.classList.add('hidden');
+}
+
+function confirmModalProceed() {
+  const beforeCount = cards.length;
+  cards = cards.filter(c => c.pinned);
+  const removed = beforeCount - cards.length;
+  saveCardsToStorage();
+  updateCounters();
+  renderBoard();
+  closeConfirmModal();
+  logEvent('Cleared Unpinned', `Removed ${removed} card(s)`);
+  triggerToast(`Cleared ${removed} unpinned note(s)`);
+}
+
+// ============================================================================
+// Telemetry & Modals (Status, Events)
+// ============================================================================
+function openStatsModal() {
+  const modal = document.getElementById('statsModal');
+  if (!modal) return;
+  const activeEl = document.getElementById('statActiveNotes');
+  const pinnedEl = document.getElementById('statPinnedNotes');
+  const sizeEl = document.getElementById('statPayloadSize');
+
+  const totalBytes = cards.reduce((sum, c) => sum + new Blob([c.content]).size, 0);
+  if (activeEl) activeEl.textContent = cards.length;
+  if (pinnedEl) pinnedEl.textContent = cards.filter(c => c.pinned).length;
+  if (sizeEl) sizeEl.textContent = `${totalBytes} Bytes (~${(totalBytes / 1024).toFixed(2)} KB)`;
+
+  modal.classList.remove('hidden');
+}
+
+function closeStatsModal() {
+  const modal = document.getElementById('statsModal');
+  if (modal) modal.classList.add('hidden');
+}
+
+function openEventsModal() {
+  const modal = document.getElementById('eventsModal');
+  const container = document.getElementById('eventsLogContainer');
+  if (!modal || !container) return;
+
+  if (eventsLog.length === 0) {
+    container.innerHTML = `<p class="text-slate-500 italic">No events logged yet.</p>`;
+  } else {
+    container.innerHTML = eventsLog.map(e => `
+      <div class="flex items-center justify-between py-1 border-b border-surface-border dark:border-dark-border">
+        <div class="flex items-center gap-2">
+          <span class="text-brand-500 font-semibold">[${e.timestamp}]</span>
+          <span class="text-slate-800 dark:text-slate-200">${escapeHtml(e.action)}</span>
+        </div>
+        <span class="text-slate-400 text-[10px] truncate max-w-[140px]">${escapeHtml(e.details || '')}</span>
+      </div>
+    `).join('');
   }
 
-  const search = document.getElementById('searchInput');
+  modal.classList.remove('hidden');
+}
+
+function closeEventsModal() {
+  const modal = document.getElementById('eventsModal');
+  if (modal) modal.classList.add('hidden');
+}
+
+function clearEventsLog() {
+  eventsLog = [];
+  try {
+    localStorage.removeItem(EVENTS_KEY);
+  } catch (e) {}
+  openEventsModal();
+  triggerToast('Events log cleared');
+}
+
+// ============================================================================
+// Mobile Navigation Tab Switcher
+// ============================================================================
+function mobileNavSelect(tab) {
+  const mobScratch = document.getElementById('mobNavScratchpad');
+  const mobSnippets = document.getElementById('mobNavSnippets');
+
+  if (tab === 'scratchpad') {
+    setFilter('ALL');
+    if (mobScratch) mobScratch.className = 'flex flex-col items-center justify-center w-14 h-12 transition-colors text-brand-600 dark:text-brand-400 font-semibold';
+    if (mobSnippets) mobSnippets.className = 'flex flex-col items-center justify-center w-14 h-12 transition-colors text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white';
+  } else if (tab === 'snippets') {
+    setFilter('CODE');
+    if (mobSnippets) mobSnippets.className = 'flex flex-col items-center justify-center w-14 h-12 transition-colors text-brand-600 dark:text-brand-400 font-semibold';
+    if (mobScratch) mobScratch.className = 'flex flex-col items-center justify-center w-14 h-12 transition-colors text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white';
+  }
+}
+
+// ============================================================================
+// Event Listeners & Keyboard Shortcuts
+// ============================================================================
+document.addEventListener('DOMContentLoaded', () => {
+  loadState();
+
+  const titleInput = document.getElementById('noteTitleInput');
+  const bodyInput = document.getElementById('noteBodyInput');
+  const desktopSearch = document.getElementById('desktopSearchInput');
   const mobileSearch = document.getElementById('mobileSearchInput');
 
-  function handleSearchInput(val) {
-    searchQuery = val.trim();
-    if (search && search.value !== val) search.value = val;
-    if (mobileSearch && mobileSearch.value !== val) mobileSearch.value = val;
+  if (bodyInput) {
+    bodyInput.addEventListener('input', updateComposerStats);
+  }
+  if (titleInput) {
+    titleInput.addEventListener('input', updateComposerStats);
+  }
+
+  // Live search handler
+  function handleSearch(e) {
+    searchQuery = e.target.value;
+    if (e.target === desktopSearch && mobileSearch) mobileSearch.value = searchQuery;
+    if (e.target === mobileSearch && desktopSearch) desktopSearch.value = searchQuery;
     renderBoard();
   }
 
-  if (search) {
-    search.addEventListener('input', (e) => handleSearchInput(e.target.value));
-  }
-  if (mobileSearch) {
-    mobileSearch.addEventListener('input', (e) => handleSearchInput(e.target.value));
-  }
+  if (desktopSearch) desktopSearch.addEventListener('input', handleSearch);
+  if (mobileSearch) mobileSearch.addEventListener('input', handleSearch);
 
-  window.addEventListener('keydown', (e) => {
-    if (e.key === '/' && document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'TEXTAREA') {
+  // Keyboard shortcuts
+  document.addEventListener('keydown', (e) => {
+    // / to focus search (when not in input)
+    if (e.key === '/' && !['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) {
       e.preventDefault();
-      const s = document.getElementById('searchInput');
-      if (s) { s.focus(); s.select(); }
+      if (window.innerWidth >= 768 && desktopSearch) desktopSearch.focus();
+      else if (mobileSearch) mobileSearch.focus();
     }
+
+    // Ctrl+K or Cmd+K to search
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+      e.preventDefault();
+      if (window.innerWidth >= 768 && desktopSearch) desktopSearch.focus();
+      else if (mobileSearch) mobileSearch.focus();
+    }
+
+    // Ctrl+N or Cmd+N to create new entry
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'n') {
+      e.preventDefault();
+      focusComposer();
+    }
+
+    // Ctrl+Enter or Cmd+Enter to Save Note
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+      if (document.activeElement === bodyInput || document.activeElement === titleInput) {
+        e.preventDefault();
+        addScratchCard();
+      }
+    }
+
+    // Escape to close modals or blur search
     if (e.key === 'Escape') {
       closeExportModal();
       closeConfirmModal();
-      if (editingNoteId) {
-        editingNoteId = null;
-        renderBoard();
-      }
+      closeStatsModal();
+      closeEventsModal();
+      if (document.activeElement) document.activeElement.blur();
     }
   });
 });

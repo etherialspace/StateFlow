@@ -1,220 +1,569 @@
 <!DOCTYPE html>
-<html lang="en">
+<html class="dark" lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>StateFlow — Render-Style Developer Scratchpad</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <title>StateFlow — Developer Scratchpad &amp; Payload Studio</title>
+
+  <!-- Google Fonts: Inter, JetBrains Mono, Geist -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  
+  <!-- Material Symbols Outlined -->
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet" />
+
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <!-- Tailwind CSS v3 with Forms & Container Queries -->
+  <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#f5f3ff',
+              100: '#ede9fe',
+              200: '#ddd6fe',
+              300: '#c4b5fd',
+              400: '#a78bfa',
+              500: '#8b5cf6',
+              600: '#7c3aed',
+              700: '#6d28d9',
+              800: '#5b21b6',
+              900: '#4c1d95',
+            },
+            dark: {
+              base: '#090a0f',
+              surface: '#0f1117',
+              card: '#131620',
+              cardHover: '#181c28',
+              border: '#1f2433',
+              borderMuted: '#161922'
+            },
+            surface: {
+              base: '#f8fafc',
+              subtle: '#f1f5f9',
+              card: '#ffffff',
+              cardHover: '#f8fafc',
+              border: '#e2e8f0',
+              borderMuted: '#f1f5f9'
+            }
+          },
+          fontFamily: {
+            sans: ['Inter', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+            geist: ['Geist', 'sans-serif']
+          },
+          boxShadow: {
+            'glow-sm': '0 0 15px -3px rgba(124, 58, 237, 0.25)',
+            'glow-md': '0 0 25px -4px rgba(124, 58, 237, 0.35)',
+            'glow-emerald': '0 0 15px -3px rgba(16, 185, 129, 0.3)',
+          }
+        }
+      }
+    };
+  </script>
+
   <link rel="stylesheet" href="styles.css" />
 </head>
-<body data-theme="dark">
 
-  <!-- Top Navbar (56px fixed, border-bottom: 1px solid #222222, bg: #0A0A0A) -->
-  <header class="navbar">
-    <div class="navbar-inner">
-      <div class="navbar-left">
-        <div class="brand">
-          <span class="mark-poly"></span>
-          <span class="brand-name">StateFlow</span>
+<body class="bg-surface-base dark:bg-dark-base text-slate-700 dark:text-slate-300 font-sans min-h-screen antialiased selection:bg-brand-600 selection:text-white relative subtle-grid">
+
+  <!-- Toast Notification Simulator -->
+  <div id="toastNotification" class="fixed bottom-20 md:bottom-6 right-4 md:right-6 z-50 transform translate-y-24 opacity-0 transition-all duration-300 pointer-events-none flex items-center gap-3 bg-white dark:bg-dark-card border border-brand-500/40 text-slate-900 dark:text-white px-4 py-3 rounded-xl shadow-lg dark:shadow-glow-md">
+    <i class="w-5 h-5 text-emerald-500 dark:text-emerald-400 shrink-0" data-lucide="check-circle-2"></i>
+    <span id="toastMessage" class="text-sm font-medium">Payload copied to clipboard</span>
+  </div>
+
+  <!-- =========================================================================
+       DESKTOP HEADER (Visible on md and up)
+       ========================================================================= -->
+  <header class="hidden md:block sticky top-0 z-40 w-full border-b border-surface-border dark:border-dark-border glass-panel">
+    <div class="max-w-[1720px] mx-auto px-4 sm:px-6 h-14 flex items-center justify-between gap-4">
+      
+      <!-- Brand & Version -->
+      <div class="flex items-center gap-3 shrink-0" data-purpose="brand-identity">
+        <div class="relative flex items-center justify-center w-8 h-8 rounded-lg bg-gradient-to-br from-brand-500 via-indigo-600 to-purple-800 p-[1px] shadow-glow-sm">
+          <div class="w-full h-full bg-white dark:bg-dark-base rounded-[7px] flex items-center justify-center">
+            <!-- Diamond Flow Symbol -->
+            <svg class="w-4 h-4 text-brand-600 dark:text-brand-500 transform rotate-45" fill="currentColor" viewBox="0 0 24 24">
+              <rect height="14" rx="3" width="14" x="5" y="5"></rect>
+            </svg>
+          </div>
+        </div>
+        <span class="font-bold text-slate-900 dark:text-white tracking-tight text-base flex items-center gap-2">
+          StateFlow
+          <span class="text-[10px] font-mono font-medium px-1.5 py-0.5 rounded bg-brand-50 dark:bg-brand-500/10 text-brand-700 dark:text-brand-400 border border-brand-200 dark:border-brand-500/20">v2.4 Pro</span>
+        </span>
+      </div>
+
+      <!-- Command Palette / Global Search Bar -->
+      <div class="flex-1 max-w-xl mx-auto" data-purpose="command-palette">
+        <div class="relative group">
+          <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400 dark:text-slate-500 group-focus-within:text-brand-600 dark:group-focus-within:text-brand-400 transition-colors">
+            <i class="w-4 h-4" data-lucide="search"></i>
+          </div>
+          <input
+            id="desktopSearchInput"
+            class="w-full pl-9 pr-24 py-1.5 bg-white dark:bg-dark-surface/90 border border-surface-border dark:border-dark-border rounded-lg text-xs md:text-sm text-slate-800 dark:text-slate-200 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20 dark:focus:ring-brand-500/50 focus:border-brand-500 transition-all font-sans"
+            placeholder="Search notes, payloads, code snippets, tokens... (Press / to search)"
+            type="text"
+          />
+          <div class="absolute inset-y-0 right-0 pr-2.5 flex items-center gap-1.5 pointer-events-none">
+            <kbd class="hidden sm:inline-flex items-center text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-100 dark:bg-dark-border text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-700/60 shadow-sm">Ctrl</kbd>
+            <kbd class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-100 dark:bg-dark-border text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-700/60 shadow-sm">K</kbd>
+          </div>
         </div>
       </div>
 
-      <div class="navbar-center">
-        <div class="search-box">
-          <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="11" cy="11" r="8"></circle>
-            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-          </svg>
-          <input id="searchInput" type="text" class="search-input" placeholder="Search notes, payloads (Press /)..." />
-          <kbd class="kbd-shortcut">/</kbd>
+      <!-- Quick Control Tools -->
+      <div class="flex items-center gap-2.5 shrink-0" data-purpose="navigation-actions">
+        <!-- Privacy Toggle -->
+        <button
+          id="privacyToggleBtn"
+          onclick="togglePrivacyMode()"
+          class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/40 hover:bg-emerald-100/70 dark:hover:bg-emerald-900/40 transition-colors"
+          title="Privacy: Offline Local Storage (Masked Secrets)"
+        >
+          <i class="w-3.5 h-3.5" data-lucide="shield-check"></i>
+          <span id="privacyBtnLabel">Privacy: Local Only</span>
+        </button>
+
+        <!-- Theme Toggle -->
+        <button
+          id="themeToggleBtn"
+          onclick="toggleContrastTheme()"
+          class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 bg-white dark:bg-dark-card border border-surface-border dark:border-dark-border hover:border-slate-300 dark:hover:border-slate-700 transition-colors"
+          title="Switch Dark/Light Theme"
+        >
+          <i id="themeToggleIcon" class="w-3.5 h-3.5 text-brand-600 dark:text-brand-400" data-lucide="moon"></i>
+          <span id="themeToggleLabel" class="text-slate-700 dark:text-slate-300">Dark</span>
+        </button>
+
+        <!-- Sync Indicator -->
+        <div class="hidden sm:flex items-center gap-1.5 px-2 py-1.5 text-xs text-slate-500">
+          <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+          <span class="text-[11px] font-mono">Synced</span>
         </div>
-      </div>
 
-      <div class="navbar-right">
-        <button id="privacyToggleBtn" class="btn btn-secondary btn-sm" onclick="togglePrivacyMode()" title="Toggle secret masking">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
-          </svg>
-          <span id="privacyLabel">
-            <span class="btn-text-full">Privacy: Off</span>
-            <span class="btn-text-short">Mask</span>
-          </span>
-        </button>
+        <!-- Export Dropdown -->
+        <div class="relative">
+          <button
+            id="exportDropdownTrigger"
+            onclick="toggleExportDropdown()"
+            class="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium text-slate-700 dark:text-white bg-white dark:bg-dark-card hover:bg-slate-50 dark:hover:bg-dark-cardHover border border-surface-border dark:border-dark-border hover:border-slate-300 dark:hover:border-slate-700 transition-all shadow-sm"
+          >
+            <i class="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" data-lucide="download"></i>
+            <span>Export</span>
+            <i class="w-3 h-3 text-slate-400 dark:text-slate-500" data-lucide="chevron-down"></i>
+          </button>
+          
+          <div id="exportDropdownMenu" class="hidden absolute right-0 mt-2 w-48 bg-white dark:bg-dark-card border border-surface-border dark:border-dark-border rounded-xl shadow-xl py-1 z-50">
+            <button onclick="openExportModal()" class="w-full text-left px-3.5 py-2 text-xs text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-dark-cardHover flex items-center gap-2">
+              <i class="w-3.5 h-3.5 text-brand-500" data-lucide="file-text"></i>
+              <span>Export Markdown</span>
+            </button>
+            <button onclick="downloadMarkdownFile()" class="w-full text-left px-3.5 py-2 text-xs text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-dark-cardHover flex items-center gap-2">
+              <i class="w-3.5 h-3.5 text-emerald-500" data-lucide="arrow-down-to-line"></i>
+              <span>Download .md File</span>
+            </button>
+            <button onclick="copyAllMarkdownDigest()" class="w-full text-left px-3.5 py-2 text-xs text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-dark-cardHover flex items-center gap-2">
+              <i class="w-3.5 h-3.5 text-blue-500" data-lucide="copy"></i>
+              <span>Copy All to Clipboard</span>
+            </button>
+          </div>
+        </div>
 
-        <button id="themeToggleBtn" class="btn btn-secondary btn-sm" onclick="toggleContrastTheme()" title="Switch dark/light theme">
-          <svg class="theme-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
-          </svg>
-          <span class="btn-text-full">Theme: Dark</span>
-          <span class="btn-text-short">Dark</span>
-        </button>
-
-        <button class="btn btn-primary btn-sm" onclick="openExportModal()" title="Export workspace markdown">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-            <polyline points="7 10 12 15 17 10"></polyline>
-            <line x1="12" y1="15" x2="12" y2="3"></line>
-          </svg>
-          <span class="btn-text-full">Export Markdown</span>
-          <span class="btn-text-short">Export</span>
-        </button>
       </div>
     </div>
   </header>
 
-  <!-- Main Content Workspace (Base Background #000000 True Black) -->
-  <main class="main-container">
-    <!-- Ingestion / Composer Box (Elevated Surface #0A0A0A, 1px border #222222) -->
-    <section class="composer-card">
-      <div class="composer-header">
-        <span class="composer-section-label">NEW NOTE ENTRY</span>
+  <!-- =========================================================================
+       MOBILE HEADER (Visible on screens < md)
+       ========================================================================= -->
+  <header class="block md:hidden sticky top-0 z-40 w-full pt-safe border-b border-surface-border dark:border-dark-border glass-panel">
+    <div class="h-14 px-4 flex items-center justify-between gap-2">
+      <div class="flex items-center gap-2.5 min-w-0">
+        <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-brand-500 to-indigo-600 p-[1px] flex items-center justify-center shadow-sm shrink-0">
+          <div class="w-full h-full bg-white dark:bg-dark-base rounded-[7px] flex items-center justify-center">
+            <span class="material-symbols-outlined text-[18px] text-brand-600 dark:text-brand-400">terminal</span>
+          </div>
+        </div>
+        <div class="flex flex-col min-w-0">
+          <div class="flex items-center gap-1.5">
+            <span class="font-bold text-slate-900 dark:text-white text-base tracking-tight truncate">StateFlow</span>
+            <span class="font-mono text-[10px] px-1.5 py-0.2 rounded bg-slate-100 dark:bg-dark-surface text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-dark-border">v2.4</span>
+          </div>
+          <div class="flex items-center gap-1.5">
+            <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+            <span class="text-[10px] font-mono text-emerald-600 dark:text-emerald-400 truncate">Local Sync Active</span>
+          </div>
+        </div>
       </div>
 
-      <!-- Mandatory Note Title at the Top -->
-      <div class="composer-title-wrapper">
+      <div class="flex items-center gap-1 shrink-0">
+        <!-- Privacy Shield -->
+        <button onclick="togglePrivacyMode()" aria-label="Toggle Privacy" class="w-9 h-9 flex items-center justify-center rounded-lg text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white">
+          <span id="mobilePrivacyIcon" class="material-symbols-outlined text-[19px] text-emerald-500">shield_lock</span>
+        </button>
+        <!-- Theme Toggle -->
+        <button onclick="toggleContrastTheme()" aria-label="Toggle Theme" class="w-9 h-9 flex items-center justify-center rounded-lg text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white">
+          <span id="mobileThemeIcon" class="material-symbols-outlined text-[19px]">dark_mode</span>
+        </button>
+        <!-- Export / Sync -->
+        <button onclick="openExportModal()" aria-label="Export Workspace" class="w-9 h-9 flex items-center justify-center rounded-lg text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white">
+          <span class="material-symbols-outlined text-[19px]">download</span>
+        </button>
+        <!-- User Avatar -->
+        <div class="w-7 h-7 rounded-full bg-brand-600 text-white flex items-center justify-center text-xs font-semibold shrink-0 ml-1">
+          <span class="material-symbols-outlined text-[16px]">person</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Mobile Search Bar (Direct sub-header) -->
+    <div class="px-4 pb-2.5">
+      <div class="relative flex items-center w-full h-10 px-3 rounded-xl bg-white dark:bg-dark-surface/90 border border-surface-border dark:border-dark-border gap-2">
+        <span class="material-symbols-outlined text-[18px] text-slate-400 shrink-0">search</span>
         <input
-          id="scratchTitleInput"
-          type="text"
-          class="composer-title-input"
-          placeholder="Note title (required)..."
-          required
+          id="mobileSearchInput"
+          class="w-full bg-transparent text-slate-900 dark:text-slate-200 placeholder:text-slate-400 text-xs font-sans focus:outline-none"
+          placeholder="Search notes, payloads, code..."
+          type="search"
         />
+        <div class="flex items-center gap-1 shrink-0">
+          <kbd class="inline-flex items-center text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-100 dark:bg-dark-border text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-700/60">⌘K</kbd>
+        </div>
       </div>
+    </div>
+  </header>
 
-      <textarea
-        id="scratchInput"
-        class="composer-textarea"
-        placeholder="Type notes, tasks (- [ ] task), URLs with tracking tags, JSON payloads, math formulas (e.g. 450 * 12), or tabular CSV..."
-      ></textarea>
-
-      <div class="composer-footer">
-        <div class="composer-toolbar-left">
-          <button class="btn btn-secondary btn-sm" onclick="composerInsertCheckbox()">+ Checklist</button>
-          <button class="btn btn-secondary btn-sm" onclick="composerCleanUrls()">Clean URLs</button>
-          <button class="btn btn-secondary btn-sm" onclick="formatComposerInPlace()">Format</button>
-          <button class="btn btn-secondary btn-sm" onclick="composerCycleCase()">Case</button>
+  <!-- =========================================================================
+       MAIN WORKBENCH CONTENT
+       ========================================================================= -->
+  <main class="max-w-[1720px] mx-auto px-4 sm:px-6 py-5 md:py-6 space-y-5 md:space-y-6 pb-28 md:pb-12">
+    
+    <!-- BEGIN: QuickEntryCard (Composer) -->
+    <section class="relative rounded-2xl bg-white dark:bg-dark-card/90 border border-surface-border dark:border-dark-border shadow-sm dark:shadow-xl backdrop-blur-sm overflow-hidden focus-within:border-brand-500/60 focus-within:ring-2 dark:focus-within:ring-1 focus-within:ring-brand-500/20 dark:focus-within:ring-brand-500/30 transition-all duration-300" data-purpose="note-entry-workbench">
+      
+      <!-- Card Sub-header: Tag Presets and Modes -->
+      <div class="px-4 sm:px-5 py-3 border-b border-surface-border dark:border-dark-border/80 flex flex-wrap items-center justify-between gap-3 bg-surface-subtle/60 dark:bg-dark-surface/50">
+        <div class="flex items-center gap-2">
+          <span class="text-[11px] font-mono tracking-wider uppercase text-slate-600 dark:text-slate-400 font-semibold flex items-center gap-1.5">
+            <span class="w-1.5 h-1.5 rounded-full bg-brand-600 dark:bg-brand-500"></span>
+            New Note Entry
+          </span>
+          <span class="hidden sm:inline font-mono text-[10px] text-slate-400 dark:text-slate-500 px-1.5 py-0.5 rounded bg-slate-100 dark:bg-dark-card border border-slate-200 dark:border-dark-border">Scratchpad buffer</span>
         </div>
 
-        <div class="composer-toolbar-right">
-          <label class="pin-checkbox-label">
-            <input id="pinOnCreate" type="checkbox" />
-            <span>Pin Note</span>
+        <!-- Mobile Collapse Toggle -->
+        <div class="flex items-center gap-1 sm:hidden ml-auto">
+          <button id="mobileCollapseComposerBtn" onclick="toggleComposerCollapse()" aria-label="Collapse composer" class="w-7 h-7 flex items-center justify-center rounded text-slate-500 hover:text-slate-800 dark:hover:text-white">
+            <span id="collapseComposerIcon" class="material-symbols-outlined text-[18px]">expand_less</span>
+          </button>
+        </div>
+
+        <!-- Quick Syntax Action Pills -->
+        <div class="w-full sm:w-auto flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5">
+          <button onclick="composerInsertCheckbox()" class="flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-md bg-white dark:bg-dark-surface hover:bg-brand-50 dark:hover:bg-brand-950/40 text-slate-700 dark:text-slate-300 hover:text-brand-700 dark:hover:text-brand-300 border border-surface-border dark:border-dark-border hover:border-brand-300 dark:hover:border-brand-500/40 transition-colors shadow-xs shrink-0">
+            <i class="w-3 h-3 text-brand-600 dark:text-brand-400" data-lucide="check-square"></i>
+            <span>+ Checklist</span>
+          </button>
+          
+          <button onclick="composerCleanUrls()" class="flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-md bg-white dark:bg-dark-surface hover:bg-cyan-50 dark:hover:bg-cyan-950/40 text-slate-700 dark:text-slate-300 hover:text-cyan-700 dark:hover:text-cyan-300 border border-surface-border dark:border-dark-border hover:border-cyan-300 dark:hover:border-cyan-500/40 transition-colors shadow-xs shrink-0">
+            <i class="w-3 h-3 text-cyan-600 dark:text-cyan-400" data-lucide="link"></i>
+            <span>Clean URLs</span>
+          </button>
+          
+          <button onclick="composerFormatJson()" class="flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-md bg-white dark:bg-dark-surface hover:bg-amber-50 dark:hover:bg-amber-950/40 text-slate-700 dark:text-slate-300 hover:text-amber-800 dark:hover:text-amber-300 border border-surface-border dark:border-dark-border hover:border-amber-300 dark:hover:border-amber-500/40 transition-colors shadow-xs shrink-0">
+            <i class="w-3 h-3 text-amber-600 dark:text-amber-400" data-lucide="braces"></i>
+            <span>Format JSON</span>
+          </button>
+          
+          <button onclick="composerCycleCase()" class="flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-md bg-white dark:bg-dark-surface hover:bg-rose-50 dark:hover:bg-rose-950/40 text-slate-700 dark:text-slate-300 hover:text-rose-700 dark:hover:text-rose-300 border border-surface-border dark:border-dark-border hover:border-rose-300 dark:hover:border-rose-500/40 transition-colors shadow-xs shrink-0">
+            <i class="w-3 h-3 text-rose-600 dark:text-rose-400" data-lucide="type"></i>
+            <span>Case</span>
+          </button>
+          
+          <button onclick="composerEvaluateMath()" class="flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-md bg-white dark:bg-dark-surface hover:bg-emerald-50 dark:hover:bg-emerald-950/40 text-slate-700 dark:text-slate-300 hover:text-emerald-700 dark:hover:text-emerald-300 border border-surface-border dark:border-dark-border hover:border-emerald-300 dark:hover:border-emerald-500/40 transition-colors shadow-xs shrink-0">
+            <i class="w-3 h-3 text-emerald-600 dark:text-emerald-400" data-lucide="calculator"></i>
+            <span>Math / Calc</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Composer Body & Inputs -->
+      <div id="composerBodyContainer" class="p-4 sm:p-5 space-y-3.5 sm:space-y-4">
+        <!-- Title Input -->
+        <div>
+          <input
+            id="noteTitleInput"
+            class="w-full bg-slate-50/70 dark:bg-dark-surface/60 border border-surface-border dark:border-dark-border rounded-xl px-4 py-2.5 text-sm md:text-base text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-brand-500 dark:focus:border-brand-500/70 focus:bg-white dark:focus:bg-dark-surface focus:ring-1 focus:ring-brand-500/30 transition-all font-medium"
+            placeholder="Note title (required)..."
+            type="text"
+          />
+        </div>
+
+        <!-- Textarea / Editor Field -->
+        <div class="relative">
+          <textarea
+            id="noteBodyInput"
+            rows="5"
+            class="w-full bg-slate-50/50 dark:bg-dark-surface/40 border border-surface-border dark:border-dark-border rounded-xl px-4 py-3 text-sm font-mono text-slate-800 dark:text-slate-200 placeholder-slate-400 dark:placeholder-slate-600 focus:outline-none focus:border-brand-500 dark:focus:border-brand-500/70 focus:bg-white dark:focus:bg-dark-surface/80 focus:ring-1 focus:ring-brand-500/30 transition-all resize-y leading-relaxed"
+            placeholder="Type notes, tasks (- [ ] task), URLs with tracking tags, JSON payloads, math formulas (e.g. 450 * 12), or tabular CSV..."
+          ></textarea>
+        </div>
+      </div>
+
+      <!-- Action Footer with Pin and Save Note -->
+      <div class="px-4 sm:px-5 py-3 bg-surface-subtle/50 dark:bg-dark-surface/40 border-t border-surface-border dark:border-dark-border/80 flex flex-wrap items-center justify-between gap-3 sm:gap-4">
+        <!-- Quick stats & syntax feedback -->
+        <div class="flex items-center gap-3 sm:gap-4 text-xs font-mono text-slate-500">
+          <span class="flex items-center gap-1.5">
+            <i class="w-3.5 h-3.5 text-slate-400" data-lucide="file-text"></i>
+            <span id="wordCountLabel">0 words</span>
+          </span>
+          <span class="text-slate-300 dark:text-dark-border">•</span>
+          <span id="charCountLabel" class="hidden sm:inline">0 chars</span>
+          <span class="text-slate-300 dark:text-dark-border">•</span>
+          <span id="autoDetectBadge" class="truncate">Auto-detect mode</span>
+        </div>
+
+        <!-- Controls: Pin Toggle & Save Button -->
+        <div class="flex items-center gap-3 sm:gap-4 ml-auto">
+          <!-- Pin Note Checkbox Toggle -->
+          <label class="flex items-center gap-2 cursor-pointer select-none">
+            <input
+              id="pinNoteCheckbox"
+              type="checkbox"
+              class="w-4 h-4 rounded border-slate-300 dark:border-dark-border bg-white dark:bg-dark-surface text-brand-600 focus:ring-brand-500 focus:ring-offset-0 transition-colors"
+            />
+            <span class="text-xs font-medium text-slate-600 dark:text-slate-300">Pin Note</span>
           </label>
-          <button class="btn btn-primary btn-sm" onclick="addScratchCard()">Save Note</button>
+
+          <!-- Save Note CTA Button -->
+          <button
+            id="saveNoteBtn"
+            onclick="addScratchCard()"
+            class="flex items-center gap-2 px-4 sm:px-5 py-2 rounded-xl text-xs md:text-sm font-semibold text-white bg-gradient-to-r from-brand-600 to-indigo-600 hover:from-brand-500 hover:to-indigo-500 active:scale-95 shadow-sm dark:shadow-glow-sm hover:shadow-glow-md transition-all"
+          >
+            <i class="w-4 h-4" data-lucide="plus"></i>
+            <span id="saveNoteBtnText">Save Note</span>
+          </button>
         </div>
       </div>
     </section>
+    <!-- END: QuickEntryCard -->
 
-    <!-- View & Filter Controls Toolbar -->
-    <section class="controls-bar">
-      <!-- Mobile Search Input (Visible on mobile/tablet <= 768px) -->
-      <div class="mobile-search-box">
-        <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <circle cx="11" cy="11" r="8"></circle>
-          <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-        </svg>
-        <input id="mobileSearchInput" type="text" class="search-input" placeholder="Search notes, payloads..." />
+    <!-- BEGIN: FilterAndViewsToolbar -->
+    <div class="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 md:gap-4 py-1" data-purpose="filtering-bar">
+      <!-- Filter Chips With Badge Counts (Scrollable on mobile) -->
+      <div class="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5 w-full md:w-auto">
+        <button onclick="setFilter('ALL')" data-filter="ALL" class="filter-pill flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-brand-600 text-white shadow-sm shrink-0">
+          <span>All</span>
+          <span id="countAll" class="px-1.5 py-0.2 rounded-full text-[10px] bg-brand-800 text-white font-mono">0</span>
+        </button>
+        <button onclick="setFilter('PINNED')" data-filter="PINNED" class="filter-pill flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-white dark:bg-dark-card hover:bg-slate-50 dark:hover:bg-dark-cardHover border border-surface-border dark:border-dark-border text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 transition-colors shadow-xs shrink-0">
+          <span>Pinned</span>
+          <span id="countPinned" class="px-1.5 py-0.2 rounded-full text-[10px] bg-slate-100 dark:bg-dark-surface text-slate-600 dark:text-slate-400 font-mono">0</span>
+        </button>
+        <button onclick="setFilter('TASKS')" data-filter="TASKS" class="filter-pill flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-white dark:bg-dark-card hover:bg-slate-50 dark:hover:bg-dark-cardHover border border-surface-border dark:border-dark-border text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 transition-colors shadow-xs shrink-0">
+          <span>Checklists</span>
+          <span id="countTasks" class="px-1.5 py-0.2 rounded-full text-[10px] bg-slate-100 dark:bg-dark-surface text-slate-600 dark:text-slate-400 font-mono">0</span>
+        </button>
+        <button onclick="setFilter('URL')" data-filter="URL" class="filter-pill flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-white dark:bg-dark-card hover:bg-slate-50 dark:hover:bg-dark-cardHover border border-surface-border dark:border-dark-border text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 transition-colors shadow-xs shrink-0">
+          <span>Clean Links</span>
+          <span id="countUrl" class="px-1.5 py-0.2 rounded-full text-[10px] bg-slate-100 dark:bg-dark-surface text-slate-600 dark:text-slate-400 font-mono">0</span>
+        </button>
+        <button onclick="setFilter('JSON')" data-filter="JSON" class="filter-pill flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-white dark:bg-dark-card hover:bg-slate-50 dark:hover:bg-dark-cardHover border border-surface-border dark:border-dark-border text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 transition-colors shadow-xs shrink-0">
+          <span>JSON</span>
+          <span id="countJson" class="px-1.5 py-0.2 rounded-full text-[10px] bg-slate-100 dark:bg-dark-surface text-slate-600 dark:text-slate-400 font-mono">0</span>
+        </button>
+        <button onclick="setFilter('SECRET')" data-filter="SECRET" class="filter-pill flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-white dark:bg-dark-card hover:bg-slate-50 dark:hover:bg-dark-cardHover border border-surface-border dark:border-dark-border text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 transition-colors shadow-xs shrink-0">
+          <span>Credentials</span>
+          <span id="countSecret" class="px-1.5 py-0.2 rounded-full text-[10px] bg-slate-100 dark:bg-dark-surface text-slate-600 dark:text-slate-400 font-mono">0</span>
+        </button>
+        <button onclick="setFilter('TABLE')" data-filter="TABLE" class="filter-pill flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-white dark:bg-dark-card hover:bg-slate-50 dark:hover:bg-dark-cardHover border border-surface-border dark:border-dark-border text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 transition-colors shadow-xs shrink-0">
+          <span>Tables</span>
+          <span id="countTable" class="px-1.5 py-0.2 rounded-full text-[10px] bg-slate-100 dark:bg-dark-surface text-slate-600 dark:text-slate-400 font-mono">0</span>
+        </button>
+        <button onclick="setFilter('NOTE')" data-filter="NOTE" class="filter-pill flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-white dark:bg-dark-card hover:bg-slate-50 dark:hover:bg-dark-cardHover border border-surface-border dark:border-dark-border text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 transition-colors shadow-xs shrink-0">
+          <span>Notes</span>
+          <span id="countNote" class="px-1.5 py-0.2 rounded-full text-[10px] bg-slate-100 dark:bg-dark-surface text-slate-600 dark:text-slate-400 font-mono">0</span>
+        </button>
       </div>
 
-      <div class="filter-pills">
-        <button class="filter-pill active" data-filter="ALL" onclick="setFilter('ALL')">
-          All <span id="countAll" class="pill-counter">0</span>
-        </button>
-        <button class="filter-pill" data-filter="PINNED" onclick="setFilter('PINNED')">
-          Pinned <span id="countPinned" class="pill-counter">0</span>
-        </button>
-        <button class="filter-pill" data-filter="TASKS" onclick="setFilter('TASKS')">
-          Checklists <span id="countTasks" class="pill-counter">0</span>
-        </button>
-        <button class="filter-pill" data-filter="URL" onclick="setFilter('URL')">
-          Clean Links <span id="countUrl" class="pill-counter">0</span>
-        </button>
-        <button class="filter-pill" data-filter="JSON" onclick="setFilter('JSON')">
-          JSON <span id="countJson" class="pill-counter">0</span>
-        </button>
-        <button class="filter-pill" data-filter="SECRET" onclick="setFilter('SECRET')">
-          Credentials <span id="countSecret" class="pill-counter">0</span>
-        </button>
-        <button class="filter-pill" data-filter="TABLE" onclick="setFilter('TABLE')">
-          Tables <span id="countTable" class="pill-counter">0</span>
-        </button>
-        <button class="filter-pill" data-filter="NOTE" onclick="setFilter('NOTE')">
-          Notes <span id="countNote" class="pill-counter">0</span>
-        </button>
-      </div>
-
-      <div class="view-controls">
-        <div class="layout-toggle-group">
-          <button class="layout-toggle-btn active" data-layout="rows" onclick="setLayout('rows')" title="Render Full-Width Rows">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+      <!-- Segmented View Switcher & Clear Option -->
+      <div class="flex items-center justify-between sm:justify-end gap-2.5 shrink-0 ml-auto w-full md:w-auto">
+        <div class="flex items-center bg-slate-100 dark:bg-dark-card border border-surface-border dark:border-dark-border p-1 rounded-xl">
+          <button id="viewRowsBtn" onclick="setLayout('rows')" class="layout-toggle-btn flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors" title="Row layout">
+            <i class="w-3.5 h-3.5" data-lucide="align-justify"></i>
             <span>Rows</span>
           </button>
-          <button class="layout-toggle-btn" data-layout="grid" onclick="setLayout('grid')" title="Card Grid">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
+          <button id="viewGridBtn" onclick="setLayout('grid')" class="layout-toggle-btn flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors" title="Grid layout">
+            <i class="w-3.5 h-3.5" data-lucide="layout-grid"></i>
             <span>Grid</span>
           </button>
-          <button class="layout-toggle-btn" data-layout="split" onclick="setLayout('split')" title="Split Inspector">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="9" y1="3" x2="9" y2="21"></line></svg>
+          <button id="viewSplitBtn" onclick="setLayout('split')" class="layout-toggle-btn flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-white dark:bg-brand-600/30 text-brand-700 dark:text-brand-300 border border-slate-200/80 dark:border-brand-500/40 shadow-sm transition-colors" title="Split view">
+            <i class="w-3.5 h-3.5" data-lucide="columns"></i>
             <span>Split</span>
           </button>
         </div>
 
-        <button class="btn btn-secondary btn-sm btn-sweep" onclick="requestSweepUnpinned()">
-          <span class="btn-text-full">Clear Unpinned</span>
-          <span class="btn-text-short">Clear</span>
+        <button onclick="requestSweepUnpinned()" class="px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 bg-white dark:bg-dark-card border border-surface-border dark:border-dark-border hover:border-rose-200 dark:hover:border-rose-900/40 rounded-xl transition-colors shadow-xs">
+          Clear Unpinned
         </button>
       </div>
-    </section>
+    </div>
+    <!-- END: FilterAndViewsToolbar -->
 
-    <!-- Note Entries List (Render-style full-width horizontal rows by default) -->
-    <section id="cardsGrid" class="layout-rows"></section>
+    <!-- Dynamic Workspace Container (Split View by default) -->
+    <div id="workspaceContentArea" class="w-full">
+      <!-- Container rendered dynamically via renderBoard() -->
+    </div>
+
   </main>
 
-  <!-- Export Markdown Modal (Render Dialog) -->
-  <div id="exportModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="exportDialogTitle" onclick="if(event.target===this)closeExportModal()">
-    <div class="modal-card dialog-form">
-      <div class="dialog-header">
-        <div class="dialog-title-group">
-          <span class="dialog-tag">EXPORT</span>
-          <h3 id="exportDialogTitle" class="dialog-title">Export Workspace Markdown</h3>
+  <!-- =========================================================================
+       MODALS & DIALOGS
+       ========================================================================= -->
+
+  <!-- Export Markdown Modal -->
+  <div id="exportModal" class="fixed inset-0 z-50 hidden bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="w-full max-w-2xl bg-white dark:bg-dark-card border border-surface-border dark:border-dark-border rounded-2xl shadow-2xl overflow-hidden animate-fade-in">
+      <div class="px-6 py-4 border-b border-surface-border dark:border-dark-border flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <span class="text-[10px] font-mono uppercase tracking-wider font-semibold px-2 py-0.5 rounded bg-brand-50 dark:bg-brand-500/10 text-brand-700 dark:text-brand-400 border border-brand-200 dark:border-brand-500/20">EXPORT</span>
+          <h3 class="text-base font-semibold text-slate-900 dark:text-white font-mono">Workspace Markdown Digest</h3>
         </div>
-        <button class="dialog-close-btn" onclick="closeExportModal()" aria-label="Close dialog">×</button>
+        <button onclick="closeExportModal()" class="text-slate-400 hover:text-slate-700 dark:hover:text-white text-lg font-bold">×</button>
       </div>
-      <div class="dialog-body">
-        <textarea id="exportMarkdownArea" class="composer-textarea" rows="12" readonly></textarea>
+      <div class="p-6">
+        <textarea id="exportMarkdownArea" readonly rows="12" class="w-full bg-slate-50 dark:bg-dark-surface/90 border border-surface-border dark:border-dark-border rounded-xl p-4 font-mono text-xs text-slate-800 dark:text-slate-200 resize-none focus:outline-none"></textarea>
       </div>
-      <div class="dialog-footer">
-        <button class="btn btn-secondary btn-sm" onclick="closeExportModal()">Cancel</button>
-        <button id="exportPrimaryBtn" class="btn btn-primary btn-sm" onclick="copyDigestMarkdown()">Copy to Clipboard</button>
+      <div class="px-6 py-3.5 bg-surface-subtle/50 dark:bg-dark-surface/40 border-t border-surface-border dark:border-dark-border flex items-center justify-end gap-3">
+        <button onclick="closeExportModal()" class="px-4 py-2 rounded-xl text-xs font-medium text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white bg-slate-100 dark:bg-dark-surface border border-surface-border dark:border-dark-border">Close</button>
+        <button onclick="downloadMarkdownFile()" class="px-4 py-2 rounded-xl text-xs font-semibold text-slate-700 dark:text-white bg-white dark:bg-dark-card hover:bg-slate-50 dark:hover:bg-dark-cardHover border border-surface-border dark:border-dark-border">Download .md</button>
+        <button onclick="copyExportAreaMarkdown()" class="px-4 py-2 rounded-xl text-xs font-semibold text-white bg-brand-600 hover:bg-brand-500 shadow-sm">Copy to Clipboard</button>
       </div>
     </div>
   </div>
 
-  <!-- Destructive Confirm Modal -->
-  <div id="confirmModal" class="modal-backdrop" role="alertdialog" aria-modal="true" aria-labelledby="confirmDialogTitle" onclick="if(event.target===this)closeConfirmModal()">
-    <div id="confirmDialogCard" class="modal-card dialog-destructive">
-      <div class="dialog-header">
-        <div class="dialog-title-group">
-          <span class="dialog-tag tag-danger">CONFIRMATION</span>
-          <h3 id="confirmDialogTitle" class="dialog-title">Clear Unpinned Cards</h3>
+  <!-- Confirmation Modal -->
+  <div id="confirmModal" class="fixed inset-0 z-50 hidden bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="w-full max-w-md bg-white dark:bg-dark-card border border-surface-border dark:border-dark-border rounded-2xl shadow-2xl overflow-hidden animate-fade-in">
+      <div class="px-5 py-4 border-b border-surface-border dark:border-dark-border flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <span class="text-[10px] font-mono uppercase tracking-wider font-semibold px-2 py-0.5 rounded bg-rose-50 dark:bg-rose-950/30 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-900/30">CONFIRM</span>
+          <h3 id="confirmModalTitle" class="text-sm font-semibold text-slate-900 dark:text-white font-mono">Clear Unpinned Cards</h3>
         </div>
-        <button class="dialog-close-btn" onclick="closeConfirmModal()" aria-label="Close dialog">×</button>
+        <button onclick="closeConfirmModal()" class="text-slate-400 hover:text-slate-700 dark:hover:text-white text-lg font-bold">×</button>
       </div>
-      <div class="dialog-body">
-        <p id="confirmDialogBody" class="dialog-message">Remove all unpinned cards from your workspace? Pinned cards will be kept.</p>
+      <div class="p-5">
+        <p id="confirmModalBody" class="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+          Remove all unpinned cards from your workspace? Pinned cards will be kept safely.
+        </p>
       </div>
-      <div class="dialog-footer">
-        <button class="btn btn-secondary btn-sm" onclick="closeConfirmModal()">Cancel</button>
-        <button id="confirmActionBtn" class="btn btn-danger btn-sm" onclick="confirmModalProceed()">Clear Unpinned</button>
+      <div class="px-5 py-3.5 bg-surface-subtle/50 dark:bg-dark-surface/40 border-t border-surface-border dark:border-dark-border flex items-center justify-end gap-3">
+        <button onclick="closeConfirmModal()" class="px-4 py-2 rounded-xl text-xs font-medium text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white bg-slate-100 dark:bg-dark-surface border border-surface-border dark:border-dark-border">Cancel</button>
+        <button id="confirmProceedBtn" onclick="confirmModalProceed()" class="px-4 py-2 rounded-xl text-xs font-semibold text-white bg-rose-600 hover:bg-rose-500 shadow-sm">Proceed</button>
       </div>
     </div>
   </div>
 
-  <!-- Toast Notification Stack -->
-  <div id="toastContainer" class="toast-container"></div>
+  <!-- Telemetry / Status Modal -->
+  <div id="statsModal" class="fixed inset-0 z-50 hidden bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="w-full max-w-md bg-white dark:bg-dark-card border border-surface-border dark:border-dark-border rounded-2xl shadow-2xl overflow-hidden animate-fade-in">
+      <div class="px-5 py-4 border-b border-surface-border dark:border-dark-border flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <span class="text-[10px] font-mono uppercase tracking-wider font-semibold px-2 py-0.5 rounded bg-emerald-50 dark:bg-emerald-950/30 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-900/30">STATUS</span>
+          <h3 class="text-sm font-semibold text-slate-900 dark:text-white font-mono">System Telemetry &amp; Storage</h3>
+        </div>
+        <button onclick="closeStatsModal()" class="text-slate-400 hover:text-slate-700 dark:hover:text-white text-lg font-bold">×</button>
+      </div>
+      <div class="p-5 space-y-3 font-mono text-xs">
+        <div class="flex items-center justify-between py-1.5 border-b border-surface-border dark:border-dark-border">
+          <span class="text-slate-500">Storage Engine:</span>
+          <span class="text-slate-900 dark:text-white font-semibold">IndexedDB / LocalStorage</span>
+        </div>
+        <div class="flex items-center justify-between py-1.5 border-b border-surface-border dark:border-dark-border">
+          <span class="text-slate-500">Active Notes:</span>
+          <span id="statActiveNotes" class="text-slate-900 dark:text-white font-semibold">0</span>
+        </div>
+        <div class="flex items-center justify-between py-1.5 border-b border-surface-border dark:border-dark-border">
+          <span class="text-slate-500">Pinned Payloads:</span>
+          <span id="statPinnedNotes" class="text-slate-900 dark:text-white font-semibold">0</span>
+        </div>
+        <div class="flex items-center justify-between py-1.5 border-b border-surface-border dark:border-dark-border">
+          <span class="text-slate-500">Payload Volume:</span>
+          <span id="statPayloadSize" class="text-slate-900 dark:text-white font-semibold">0 Bytes</span>
+        </div>
+        <div class="flex items-center justify-between py-1.5">
+          <span class="text-slate-500">Sync Pipeline:</span>
+          <span class="text-emerald-500 font-semibold flex items-center gap-1.5">
+            <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+            Offline-First Active
+          </span>
+        </div>
+      </div>
+      <div class="px-5 py-3.5 bg-surface-subtle/50 dark:bg-dark-surface/40 border-t border-surface-border dark:border-dark-border flex items-center justify-end">
+        <button onclick="closeStatsModal()" class="px-4 py-2 rounded-xl text-xs font-semibold text-white bg-brand-600 hover:bg-brand-500 shadow-sm">Done</button>
+      </div>
+    </div>
+  </div>
 
+  <!-- Events Log Modal -->
+  <div id="eventsModal" class="fixed inset-0 z-50 hidden bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="w-full max-w-lg bg-white dark:bg-dark-card border border-surface-border dark:border-dark-border rounded-2xl shadow-2xl overflow-hidden animate-fade-in">
+      <div class="px-5 py-4 border-b border-surface-border dark:border-dark-border flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <span class="text-[10px] font-mono uppercase tracking-wider font-semibold px-2 py-0.5 rounded bg-indigo-50 dark:bg-indigo-950/30 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-900/30">EVENTS</span>
+          <h3 class="text-sm font-semibold text-slate-900 dark:text-white font-mono">Telemetry &amp; Action Log</h3>
+        </div>
+        <button onclick="closeEventsModal()" class="text-slate-400 hover:text-slate-700 dark:hover:text-white text-lg font-bold">×</button>
+      </div>
+      <div class="p-5 max-h-72 overflow-y-auto font-mono text-xs space-y-2" id="eventsLogContainer">
+        <!-- Event items injected dynamically -->
+      </div>
+      <div class="px-5 py-3.5 bg-surface-subtle/50 dark:bg-dark-surface/40 border-t border-surface-border dark:border-dark-border flex items-center justify-between">
+        <button onclick="clearEventsLog()" class="text-xs text-rose-500 hover:underline">Clear Log</button>
+        <button onclick="closeEventsModal()" class="px-4 py-2 rounded-xl text-xs font-semibold text-white bg-brand-600 hover:bg-brand-500 shadow-sm">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- =========================================================================
+       MOBILE BOTTOM NAVIGATION (Fixed, visible on md:hidden)
+       ========================================================================= -->
+  <nav class="md:hidden fixed bottom-0 w-full z-50 pb-safe bg-white/90 dark:bg-dark-base/90 backdrop-blur-xl border-t border-surface-border dark:border-dark-border shadow-[0_-1px_12px_rgba(0,0,0,0.1)] dark:shadow-[0_-1px_12px_rgba(0,0,0,0.5)]">
+    <div class="flex justify-around items-center h-16 px-2">
+      <button onclick="mobileNavSelect('scratchpad')" id="mobNavScratchpad" class="flex flex-col items-center justify-center w-14 h-12 transition-colors text-brand-600 dark:text-brand-400 font-semibold">
+        <span class="material-symbols-outlined text-[20px]">code</span>
+        <span class="font-mono text-[10px] mt-0.5">Scratch</span>
+      </button>
+
+      <button onclick="mobileNavSelect('snippets')" id="mobNavSnippets" class="flex flex-col items-center justify-center w-14 h-12 transition-colors text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white">
+        <span class="material-symbols-outlined text-[20px]">folder_data</span>
+        <span class="font-mono text-[10px] mt-0.5">Snippets</span>
+      </button>
+
+      <button onclick="openEventsModal()" id="mobNavEvents" class="flex flex-col items-center justify-center w-14 h-12 transition-colors text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white">
+        <span class="material-symbols-outlined text-[20px]">terminal</span>
+        <span class="font-mono text-[10px] mt-0.5">Console</span>
+      </button>
+
+      <button onclick="openStatsModal()" id="mobNavStatus" class="flex flex-col items-center justify-center w-14 h-12 transition-colors text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white">
+        <span class="material-symbols-outlined text-[20px]">monitoring</span>
+        <span class="font-mono text-[10px] mt-0.5">Status</span>
+      </button>
+    </div>
+  </nav>
+
+  <!-- Application Logic -->
   <script src="app.js"></script>
 </body>
 </html>

@@ -1725,20 +1725,45 @@ function closeCloudSettingsModal() {
   if (modal) modal.classList.add('hidden');
 }
 
+function normalizeSupabaseUrl(input) {
+  let raw = (input || '').trim();
+  // If user pasted dashboard URL: https://supabase.com/dashboard/project/abcdefgh/...
+  const dashMatch = raw.match(/\/project\/([a-z0-9_-]+)/i);
+  if (dashMatch) {
+    return `https://${dashMatch[1]}.supabase.co`;
+  }
+  // If user pasted postgres connection string: postgresql://postgres:...@db.abcdefgh.supabase.co
+  const dbMatch = raw.match(/@db\.([a-z0-9_-]+)\.supabase\.co/i);
+  if (dbMatch) {
+    return `https://${dbMatch[1]}.supabase.co`;
+  }
+  // If user just typed the project ref: abcdefgh
+  if (/^[a-z0-9_-]{15,30}$/i.test(raw)) {
+    return `https://${raw}.supabase.co`;
+  }
+  // Ensure https://
+  if (!raw.startsWith('http://') && !raw.startsWith('https://')) {
+    raw = 'https://' + raw;
+  }
+  return raw.replace(/\/+$/, '');
+}
+
 function saveCloudConfig() {
-  const urlIn = document.getElementById('cfgSupabaseUrl')?.value.trim();
+  const rawUrl = document.getElementById('cfgSupabaseUrl')?.value.trim();
   const keyIn = document.getElementById('cfgSupabaseKey')?.value.trim();
 
-  if (!urlIn || !keyIn) {
-    triggerToast('Please provide both Project URL and Anon Key');
+  if (!rawUrl || !keyIn) {
+    triggerToast('Please provide both Project URL and API Key');
     return;
   }
 
-  const config = { url: urlIn, key: keyIn };
+  const cleanUrl = normalizeSupabaseUrl(rawUrl);
+  const config = { url: cleanUrl, key: keyIn };
   localStorage.setItem(SUPABASE_CONFIG_KEY, JSON.stringify(config));
   closeCloudSettingsModal();
   initSupabase();
   triggerToast('Connected to Supabase! You can now sign in');
+  setTimeout(() => openAuthModal(), 300);
 }
 
 function resetCloudConfigToOffline() {

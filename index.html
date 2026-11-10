@@ -16,6 +16,16 @@
   <!-- Lucide Icons -->
   <script src="https://unpkg.com/lucide@latest"></script>
 
+  <!-- Supabase JS Client for Auth & Cloud Sync -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+  <!-- PWA & Mobile Web App Meta -->
+  <link rel="manifest" href="manifest.json" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="StateFlow" />
+  <link rel="apple-touch-icon" href="icon-192.svg" />
+
   <!-- Tailwind CSS v3 with Forms & Container Queries -->
   <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
   <script>
@@ -179,6 +189,42 @@
           </div>
         </div>
 
+        <!-- User Authentication & Account Container -->
+        <div id="desktopAuthContainer" class="relative">
+          <button
+            id="desktopAuthTrigger"
+            onclick="handleUserButtonPress()"
+            class="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-gradient-to-r from-brand-600 to-indigo-600 hover:from-brand-500 hover:to-indigo-500 transition-all shadow-sm"
+          >
+            <i id="desktopAuthIcon" class="w-3.5 h-3.5" data-lucide="log-in"></i>
+            <span id="desktopAuthBtnText">Sign In</span>
+          </button>
+
+          <!-- User Dropdown Menu -->
+          <div id="userDropdownMenu" class="hidden absolute right-0 mt-2 w-56 bg-white dark:bg-dark-card border border-surface-border dark:border-dark-border rounded-xl shadow-xl py-2 z-50">
+            <div class="px-4 py-2 border-b border-surface-border dark:border-dark-border">
+              <p id="userDropdownEmail" class="text-xs font-medium text-slate-900 dark:text-white truncate">user@example.com</p>
+              <div class="flex items-center gap-1.5 mt-1">
+                <span id="userSyncPulse" class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                <span id="userSyncStatus" class="text-[10px] font-mono text-emerald-600 dark:text-emerald-400">Cloud Synced</span>
+              </div>
+            </div>
+            <button onclick="syncNotesFromCloud()" class="w-full text-left px-4 py-2 text-xs text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-dark-cardHover flex items-center gap-2">
+              <i class="w-3.5 h-3.5 text-emerald-500" data-lucide="refresh-cw"></i>
+              <span>Sync with Cloud</span>
+            </button>
+            <button onclick="openCloudSettingsModal()" class="w-full text-left px-4 py-2 text-xs text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-dark-cardHover flex items-center gap-2">
+              <i class="w-3.5 h-3.5 text-brand-500" data-lucide="settings"></i>
+              <span>Cloud Configuration</span>
+            </button>
+            <div class="my-1 border-t border-surface-border dark:border-dark-border"></div>
+            <button onclick="handleSignOut()" class="w-full text-left px-4 py-2 text-xs text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 flex items-center gap-2">
+              <i class="w-3.5 h-3.5" data-lucide="log-out"></i>
+              <span>Sign Out</span>
+            </button>
+          </div>
+        </div>
+
       </div>
     </div>
   </header>
@@ -220,10 +266,10 @@
         <button onclick="openExportModal()" aria-label="Export Workspace" class="w-9 h-9 flex items-center justify-center rounded-lg text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white">
           <span class="material-symbols-outlined text-[19px]">download</span>
         </button>
-        <!-- User Avatar -->
-        <div class="w-7 h-7 rounded-full bg-brand-600 text-white flex items-center justify-center text-xs font-semibold shrink-0 ml-1">
-          <span class="material-symbols-outlined text-[16px]">person</span>
-        </div>
+        <!-- User Avatar Button -->
+        <button id="mobileUserBtn" onclick="handleUserButtonPress()" aria-label="User Account" class="w-8 h-8 rounded-full bg-brand-600 text-white flex items-center justify-center text-xs font-semibold shrink-0 ml-1 overflow-hidden shadow-xs hover:ring-2 hover:ring-brand-500/50 transition-all">
+          <span id="mobileUserInitial" class="material-symbols-outlined text-[17px]">person</span>
+        </button>
       </div>
     </div>
 
@@ -534,6 +580,149 @@
       <div class="px-5 py-3.5 bg-surface-subtle/50 dark:bg-dark-surface/40 border-t border-surface-border dark:border-dark-border flex items-center justify-between">
         <button onclick="clearEventsLog()" class="text-xs text-rose-500 hover:underline">Clear Log</button>
         <button onclick="closeEventsModal()" class="px-4 py-2 rounded-xl text-xs font-semibold text-white bg-brand-600 hover:bg-brand-500 shadow-sm">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- =========================================================================
+       AUTHENTICATION MODAL (Google OAuth & Email Login)
+       ========================================================================= -->
+  <div id="authModal" class="fixed inset-0 z-50 hidden bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="w-full max-w-md bg-white dark:bg-dark-card border border-surface-border dark:border-dark-border rounded-2xl shadow-2xl overflow-hidden animate-fade-in">
+      <div class="px-6 py-5 border-b border-surface-border dark:border-dark-border flex items-center justify-between bg-surface-subtle/50 dark:bg-dark-surface/40">
+        <div class="flex items-center gap-2.5">
+          <div class="w-7 h-7 rounded-lg bg-gradient-to-br from-brand-500 to-indigo-600 p-[1px] flex items-center justify-center shadow-sm">
+            <div class="w-full h-full bg-white dark:bg-dark-base rounded-[6px] flex items-center justify-center">
+              <svg class="w-3.5 h-3.5 text-brand-600 dark:text-brand-500 transform rotate-45" fill="currentColor" viewBox="0 0 24 24">
+                <rect height="14" rx="3" width="14" x="5" y="5"></rect>
+              </svg>
+            </div>
+          </div>
+          <h3 class="text-base font-semibold text-slate-900 dark:text-white font-mono">Sign in to StateFlow</h3>
+        </div>
+        <button onclick="closeAuthModal()" class="text-slate-400 hover:text-slate-700 dark:hover:text-white text-lg font-bold">×</button>
+      </div>
+
+      <div class="p-6 space-y-4">
+        <!-- 1. Google OAuth Button -->
+        <button
+          onclick="handleGoogleSignIn()"
+          id="googleSignInBtn"
+          class="w-full h-11 flex items-center justify-center gap-3 rounded-xl border border-surface-border dark:border-dark-border bg-white dark:bg-dark-surface hover:bg-slate-50 dark:hover:bg-dark-cardHover text-slate-800 dark:text-white font-medium text-xs sm:text-sm shadow-xs transition-all active:scale-[0.99]"
+        >
+          <!-- Official Google "G" Logo -->
+          <svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24">
+            <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+            <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+            <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
+            <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
+          </svg>
+          <span>Continue with Google</span>
+        </button>
+
+        <!-- Divider -->
+        <div class="relative flex items-center justify-center my-2">
+          <div class="w-full border-t border-surface-border dark:border-dark-border"></div>
+          <span class="absolute bg-white dark:bg-dark-card px-2.5 text-[11px] font-mono text-slate-400">or with email</span>
+        </div>
+
+        <!-- Auth Mode Tabs -->
+        <div class="flex items-center p-1 rounded-xl bg-slate-100 dark:bg-dark-surface border border-surface-border dark:border-dark-border text-xs">
+          <button id="authTabSignIn" onclick="setAuthTab('signin')" class="flex-1 py-1.5 rounded-lg font-semibold bg-white dark:bg-dark-card text-brand-600 dark:text-brand-400 shadow-xs">Sign In</button>
+          <button id="authTabSignUp" onclick="setAuthTab('signup')" class="flex-1 py-1.5 rounded-lg text-slate-500 dark:text-slate-400">Create Account</button>
+        </div>
+
+        <!-- Email & Password Form -->
+        <form onsubmit="handleAuthSubmit(event)" class="space-y-3">
+          <div>
+            <label class="block text-xs font-mono text-slate-500 mb-1">Email address</label>
+            <input
+              id="authEmailInput"
+              type="email"
+              required
+              placeholder="you@domain.com"
+              class="w-full bg-slate-50 dark:bg-dark-surface border border-surface-border dark:border-dark-border rounded-xl px-3.5 py-2 text-xs md:text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500/30"
+            />
+          </div>
+
+          <div>
+            <label class="block text-xs font-mono text-slate-500 mb-1">Password</label>
+            <input
+              id="authPasswordInput"
+              type="password"
+              required
+              minlength="6"
+              placeholder="••••••••"
+              class="w-full bg-slate-50 dark:bg-dark-surface border border-surface-border dark:border-dark-border rounded-xl px-3.5 py-2 text-xs md:text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500/30"
+            />
+          </div>
+
+          <button
+            type="submit"
+            id="authSubmitBtn"
+            class="w-full py-2.5 rounded-xl text-xs md:text-sm font-semibold text-white bg-gradient-to-r from-brand-600 to-indigo-600 hover:from-brand-500 hover:to-indigo-500 shadow-sm active:scale-[0.99] transition-all"
+          >
+            Sign In
+          </button>
+        </form>
+
+        <p class="text-[11px] text-center text-slate-400 dark:text-slate-500 leading-normal">
+          Offline-first: your notes are saved locally and synced to your cloud account whenever connected.
+        </p>
+      </div>
+
+      <div class="px-6 py-3 bg-surface-subtle/50 dark:bg-dark-surface/40 border-t border-surface-border dark:border-dark-border flex items-center justify-between text-xs text-slate-500">
+        <span>Powered by Supabase</span>
+        <button onclick="openCloudSettingsModal()" class="text-brand-600 dark:text-brand-400 hover:underline font-medium">Cloud Keys Setup</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- =========================================================================
+       CLOUD SETTINGS MODAL (Configure Supabase Keys in UI)
+       ========================================================================= -->
+  <div id="cloudSettingsModal" class="fixed inset-0 z-50 hidden bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="w-full max-w-md bg-white dark:bg-dark-card border border-surface-border dark:border-dark-border rounded-2xl shadow-2xl overflow-hidden animate-fade-in">
+      <div class="px-5 py-4 border-b border-surface-border dark:border-dark-border flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <span class="text-[10px] font-mono uppercase tracking-wider font-semibold px-2 py-0.5 rounded bg-emerald-50 dark:bg-emerald-950/30 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-900/30">CLOUD</span>
+          <h3 class="text-sm font-semibold text-slate-900 dark:text-white font-mono">Supabase Configuration</h3>
+        </div>
+        <button onclick="closeCloudSettingsModal()" class="text-slate-400 hover:text-slate-700 dark:hover:text-white text-lg font-bold">×</button>
+      </div>
+      <div class="p-5 space-y-3.5 text-xs">
+        <p class="text-slate-500 leading-relaxed">
+          Connect your free Supabase project to enable Google authentication and real-time cloud sync across devices.
+        </p>
+        <div>
+          <label class="block font-mono text-slate-500 mb-1">Supabase Project URL</label>
+          <input
+            id="cfgSupabaseUrl"
+            type="url"
+            placeholder="https://xyzcompany.supabase.co"
+            class="w-full bg-slate-50 dark:bg-dark-surface border border-surface-border dark:border-dark-border rounded-xl px-3 py-2 text-xs text-slate-900 dark:text-white font-mono placeholder-slate-400 focus:outline-none focus:border-brand-500"
+          />
+        </div>
+        <div>
+          <label class="block font-mono text-slate-500 mb-1">Anon / Public API Key</label>
+          <input
+            id="cfgSupabaseKey"
+            type="password"
+            placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+            class="w-full bg-slate-50 dark:bg-dark-surface border border-surface-border dark:border-dark-border rounded-xl px-3 py-2 text-xs text-slate-900 dark:text-white font-mono placeholder-slate-400 focus:outline-none focus:border-brand-500"
+          />
+        </div>
+        <div class="p-2.5 rounded-lg bg-surface-subtle dark:bg-dark-surface/60 border border-surface-border dark:border-dark-border text-[11px] text-slate-500 font-mono space-y-1">
+          <div>💡 <strong>Quick Setup:</strong></div>
+          <div>1. Open <a href="https://supabase.com" target="_blank" class="text-brand-500 underline">supabase.com</a> and create a project</div>
+          <div>2. Paste <code>supabase-schema.sql</code> into SQL Editor</div>
+          <div>3. Under Auth &rarr; Providers, toggle <strong>Google</strong> enabled</div>
+          <div>4. Copy your URL &amp; Anon Key from Settings &rarr; API</div>
+        </div>
+      </div>
+      <div class="px-5 py-3.5 bg-surface-subtle/50 dark:bg-dark-surface/40 border-t border-surface-border dark:border-dark-border flex items-center justify-between">
+        <button onclick="resetCloudConfigToOffline()" class="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-200">Reset to Offline Only</button>
+        <button onclick="saveCloudConfig()" class="px-4 py-2 rounded-xl text-xs font-semibold text-white bg-brand-600 hover:bg-brand-500 shadow-sm">Save &amp; Connect</button>
       </div>
     </div>
   </div>

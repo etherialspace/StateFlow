@@ -10,6 +10,7 @@ const LAYOUT_KEY = 'stateflow_layout_v2';
 const THEME_KEY = 'stateflow_theme_v2';
 const PRIVACY_KEY = 'stateflow_privacy_v2';
 const EVENTS_KEY = 'stateflow_events_v2';
+const SUPABASE_CONFIG_KEY = 'stateflow_supabase_config_v1';
 
 let cards = [];
 let currentFilter = 'ALL';
@@ -23,6 +24,9 @@ let pendingConfirmAction = null;
 let editingNoteId = null;
 let isComposerCollapsed = false;
 let eventsLog = [];
+let supabaseClient = null;
+let currentUser = null;
+let authTabMode = 'signin';
 
 const TRACKING_PARAMS = [
   'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
@@ -694,6 +698,7 @@ function addScratchCard() {
       target.pinned = pinned;
       target.updatedAt = Date.now();
       saveCardsToStorage();
+      syncCardToCloud(target);
       logEvent('Note Updated', `Updated "${target.title}"`);
       triggerToast('Note updated successfully');
       editingNoteId = null;
@@ -722,6 +727,7 @@ function addScratchCard() {
 
     selectedSplitCardId = newCard.id;
     saveCardsToStorage();
+    syncCardToCloud(newCard);
     logEvent('Note Saved', `Created "${newCard.title}"`);
     triggerToast('Note saved successfully');
   }
@@ -748,6 +754,7 @@ function togglePinCard(id, event) {
   // Re-sort: pinned first
   cards.sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
   saveCardsToStorage();
+  syncCardToCloud(card);
   updateCounters();
   renderBoard();
   logEvent('Pin Toggled', `Note "${card.title}" ${card.pinned ? 'pinned' : 'unpinned'}`);
@@ -785,6 +792,7 @@ function deleteCard(id, event) {
   if (idx === -1) return;
   const deleted = cards.splice(idx, 1)[0];
   saveCardsToStorage();
+  deleteCardFromCloud(deleted.id);
 
   if (selectedSplitCardId === id) {
     selectedSplitCardId = cards.length > 0 ? cards[0].id : null;
@@ -839,6 +847,7 @@ function convertCardToTasks(id, event) {
 
   card.content = taskLines.join('\n');
   saveCardsToStorage();
+  syncCardToCloud(card);
   updateCounters();
   renderBoard();
   logEvent('Converted to Checklist', `Card "${card.title}"`);
@@ -1414,10 +1423,339 @@ function mobileNavSelect(tab) {
 }
 
 // ============================================================================
+// Supabase Authentication & Real-Time Cloud Sync
+// ============================================================================
+
+function getStoredSupabaseConfig() {
+  try {
+    const raw = localStorage.getItem(SUPABASE_CONFIG_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+function initSupabase() {
+  const config = getStoredSupabaseConfig();
+  if (!config || !config.url || !config.key) {
+    updateUserUI();
+    return;
+  }
+
+  try {
+    if (window.supabase && typeof window.supabase.createClient === 'function') {
+      supabaseClient = window.supabase.createClient(config.url, config.key);
+
+      // Check active session
+      supabaseClient.auth.getSession().then(({ data: { session } }) => {
+        if (session?.user) {
+          currentUser = session.user;
+          updateUserUI();
+          syncNotesFromCloud();
+        }
+      });
+
+      // Listen for session auth changes
+      supabaseClient.auth.onAuthStateChange(async (event, session) => {
+        currentUser = session?.user || null;
+        updateUserUI();
+        if (event === 'SIGNED_IN' && currentUser) {
+          logEvent('User Signed In', currentUser.email || 'Google User');
+          triggerToast(`Signed in as ${currentUser.email || 'User'}`);
+          await syncNotesFromCloud();
+        } else if (event === 'SIGNED_OUT') {
+          logEvent('User Signed Out', '');
+          triggerToast('Signed out of cloud account');
+          renderBoard();
+        }
+      });
+    }
+  } catch (err) {
+    console.error('Supabase init failed:', err);
+  }
+}
+
+function updateUserUI() {
+  const desktopBtnText = document.getElementById('desktopAuthBtnText');
+  const desktopBtnIcon = document.getElementById('desktopAuthIcon');
+  const mobileInitial = document.getElementById('mobileUserInitial');
+  const userDropdownEmail = document.getElementById('userDropdownEmail');
+  const userSyncStatus = document.getElementById('userSyncStatus');
+
+  if (currentUser) {
+    const displayName = currentUser.user_metadata?.full_name || currentUser.email || 'Account';
+    const initial = (displayName.charAt(0) || 'U').toUpperCase();
+
+    if (desktopBtnText) desktopBtnText.textContent = displayName.split(' ')[0] || displayName.split('@')[0];
+    if (desktopBtnIcon) desktopBtnIcon.setAttribute('data-lucide', 'user-check');
+    if (mobileInitial) mobileInitial.textContent = initial;
+    if (userDropdownEmail) userDropdownEmail.textContent = currentUser.email || displayName;
+    if (userSyncStatus) userSyncStatus.textContent = 'Cloud Synced';
+  } else {
+    if (desktopBtnText) desktopBtnText.textContent = 'Sign In';
+    if (desktopBtnIcon) desktopBtnIcon.setAttribute('data-lucide', 'log-in');
+    if (mobileInitial) mobileInitial.textContent = 'person';
+    if (userSyncStatus) userSyncStatus.textContent = 'Offline (Local)';
+  }
+  lucide.createIcons();
+}
+
+function handleUserButtonPress() {
+  if (currentUser) {
+    const menu = document.getElementById('userDropdownMenu');
+    if (menu) menu.classList.toggle('hidden');
+  } else {
+    openAuthModal();
+  }
+}
+
+// Close user dropdown when clicking outside
+document.addEventListener('click', (e) => {
+  const container = document.getElementById('desktopAuthContainer');
+  const menu = document.getElementById('userDropdownMenu');
+  if (menu && !menu.classList.contains('hidden') && container && !container.contains(e.target)) {
+    menu.classList.add('hidden');
+  }
+});
+
+function openAuthModal() {
+  const modal = document.getElementById('authModal');
+  if (modal) modal.classList.remove('hidden');
+}
+
+function closeAuthModal() {
+  const modal = document.getElementById('authModal');
+  if (modal) modal.classList.add('hidden');
+}
+
+function setAuthTab(mode) {
+  authTabMode = mode;
+  const tabIn = document.getElementById('authTabSignIn');
+  const tabUp = document.getElementById('authTabSignUp');
+  const btn = document.getElementById('authSubmitBtn');
+
+  if (mode === 'signin') {
+    if (tabIn) tabIn.className = 'flex-1 py-1.5 rounded-lg font-semibold bg-white dark:bg-dark-card text-brand-600 dark:text-brand-400 shadow-xs';
+    if (tabUp) tabUp.className = 'flex-1 py-1.5 rounded-lg text-slate-500 dark:text-slate-400';
+    if (btn) btn.textContent = 'Sign In';
+  } else {
+    if (tabUp) tabUp.className = 'flex-1 py-1.5 rounded-lg font-semibold bg-white dark:bg-dark-card text-brand-600 dark:text-brand-400 shadow-xs';
+    if (tabIn) tabIn.className = 'flex-1 py-1.5 rounded-lg text-slate-500 dark:text-slate-400';
+    if (btn) btn.textContent = 'Create Account';
+  }
+}
+
+async function handleGoogleSignIn() {
+  if (!supabaseClient) {
+    closeAuthModal();
+    openCloudSettingsModal();
+    triggerToast('Please configure your Supabase keys first');
+    return;
+  }
+
+  try {
+    const { error } = await supabaseClient.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: window.location.origin + window.location.pathname
+      }
+    });
+    if (error) throw error;
+  } catch (err) {
+    triggerToast(`Google sign-in error: ${err.message}`);
+  }
+}
+
+async function handleAuthSubmit(event) {
+  event.preventDefault();
+  if (!supabaseClient) {
+    closeAuthModal();
+    openCloudSettingsModal();
+    triggerToast('Please configure your Supabase keys first');
+    return;
+  }
+
+  const email = document.getElementById('authEmailInput')?.value.trim();
+  const password = document.getElementById('authPasswordInput')?.value;
+  if (!email || !password) return;
+
+  const btn = document.getElementById('authSubmitBtn');
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Authenticating...';
+  }
+
+  try {
+    if (authTabMode === 'signin') {
+      const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
+      if (error) throw error;
+      currentUser = data.user;
+      closeAuthModal();
+      triggerToast('Signed in successfully');
+      updateUserUI();
+      await syncNotesFromCloud();
+    } else {
+      const { data, error } = await supabaseClient.auth.signUp({ email, password });
+      if (error) throw error;
+      closeAuthModal();
+      triggerToast('Account created! Please check your email to confirm');
+    }
+  } catch (err) {
+    triggerToast(`Auth error: ${err.message}`);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = authTabMode === 'signin' ? 'Sign In' : 'Create Account';
+    }
+  }
+}
+
+async function handleSignOut() {
+  const menu = document.getElementById('userDropdownMenu');
+  if (menu) menu.classList.add('hidden');
+
+  if (supabaseClient) {
+    try {
+      await supabaseClient.auth.signOut();
+    } catch (e) {}
+  }
+  currentUser = null;
+  updateUserUI();
+  triggerToast('Signed out of cloud account');
+}
+
+// ----------------------------------------------------------------------------
+// Cloud Database Sync: Upsert & Delete
+// ----------------------------------------------------------------------------
+async function syncCardToCloud(card) {
+  if (!supabaseClient || !currentUser) return;
+
+  try {
+    await supabaseClient.from('notes').upsert({
+      id: card.id,
+      user_id: currentUser.id,
+      title: card.title,
+      content: card.content,
+      pinned: !!card.pinned,
+      updated_at: new Date().toISOString()
+    });
+  } catch (err) {
+    console.error('Cloud note sync error:', err);
+  }
+}
+
+async function deleteCardFromCloud(cardId) {
+  if (!supabaseClient || !currentUser) return;
+
+  try {
+    await supabaseClient.from('notes').delete().eq('id', cardId);
+  } catch (err) {
+    console.error('Cloud note delete error:', err);
+  }
+}
+
+async function syncNotesFromCloud() {
+  if (!supabaseClient || !currentUser) {
+    triggerToast('Sign in to sync notes with the cloud');
+    return;
+  }
+
+  try {
+    const { data, error } = await supabaseClient
+      .from('notes')
+      .select('*')
+      .order('pinned', { ascending: false })
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+
+    if (data && data.length > 0) {
+      const cloudCards = data.map(n => ({
+        id: n.id,
+        title: n.title,
+        content: n.content || '',
+        pinned: !!n.pinned,
+        createdAt: new Date(n.created_at).getTime()
+      }));
+
+      // Merge cloud cards with local cards (keep newest)
+      const mergedMap = new Map();
+      cloudCards.forEach(c => mergedMap.set(c.id, c));
+      cards.forEach(c => {
+        if (!mergedMap.has(c.id)) {
+          mergedMap.set(c.id, c);
+          syncCardToCloud(c); // push local-only note up to cloud
+        }
+      });
+
+      cards = Array.from(mergedMap.values()).sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
+      saveCardsToStorage();
+      if (cards.length > 0 && !selectedSplitCardId) selectedSplitCardId = cards[0].id;
+      renderBoard();
+      updateCounters();
+      triggerToast(`Synced ${cards.length} note(s) with cloud`);
+    } else if (cards.length > 0) {
+      // First time cloud user: upload existing local notes to cloud!
+      for (const c of cards) {
+        await syncCardToCloud(c);
+      }
+      triggerToast(`Uploaded ${cards.length} local note(s) to cloud`);
+    }
+  } catch (err) {
+    triggerToast(`Cloud sync error: ${err.message}`);
+  }
+}
+
+// ----------------------------------------------------------------------------
+// Cloud Settings Modal (Configure Supabase Keys)
+// ----------------------------------------------------------------------------
+function openCloudSettingsModal() {
+  const modal = document.getElementById('cloudSettingsModal');
+  const urlIn = document.getElementById('cfgSupabaseUrl');
+  const keyIn = document.getElementById('cfgSupabaseKey');
+  const cfg = getStoredSupabaseConfig();
+
+  if (urlIn) urlIn.value = cfg?.url || '';
+  if (keyIn) keyIn.value = cfg?.key || '';
+  if (modal) modal.classList.remove('hidden');
+}
+
+function closeCloudSettingsModal() {
+  const modal = document.getElementById('cloudSettingsModal');
+  if (modal) modal.classList.add('hidden');
+}
+
+function saveCloudConfig() {
+  const urlIn = document.getElementById('cfgSupabaseUrl')?.value.trim();
+  const keyIn = document.getElementById('cfgSupabaseKey')?.value.trim();
+
+  if (!urlIn || !keyIn) {
+    triggerToast('Please provide both Project URL and Anon Key');
+    return;
+  }
+
+  const config = { url: urlIn, key: keyIn };
+  localStorage.setItem(SUPABASE_CONFIG_KEY, JSON.stringify(config));
+  closeCloudSettingsModal();
+  initSupabase();
+  triggerToast('Connected to Supabase! You can now sign in');
+}
+
+function resetCloudConfigToOffline() {
+  localStorage.removeItem(SUPABASE_CONFIG_KEY);
+  supabaseClient = null;
+  currentUser = null;
+  updateUserUI();
+  closeCloudSettingsModal();
+  triggerToast('Reset to Offline Local Storage');
+}
+
+// ============================================================================
 // Event Listeners & Keyboard Shortcuts
 // ============================================================================
 document.addEventListener('DOMContentLoaded', () => {
   loadState();
+  initSupabase();
 
   const titleInput = document.getElementById('noteTitleInput');
   const bodyInput = document.getElementById('noteBodyInput');
